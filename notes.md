@@ -1,7 +1,7 @@
 Before training, you should do:
 
 ```bash
-srun --job-name=temp --nodes=1 --gpus=6 --time=8:00:00 --partition=normal --account=peilab --pty bash
+srun --job-name=qwen35 --nodes=1 --gpus=8 --time=8:00:00 --partition=preempt --account=peilab --pty bash
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH

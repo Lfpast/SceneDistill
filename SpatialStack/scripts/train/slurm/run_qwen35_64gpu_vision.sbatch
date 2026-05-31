@@ -1,12 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=qwen35-64gpu-vision
-#SBATCH --partition=gpu            # Change to your cluster's GPU partition
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --job-name=qwen35
+#SBATCH --partition=normal            # Change to your cluster's GPU partition
+#SBATCH --nodes=1
 #SBATCH --gres=gpu:8
-#SBATCH --time=08:00:00
+#SBATCH --time=10:00:00
+#SBATCH --account=peilab
 #SBATCH --output=slurm_logs/%x_%j.out
 
 set -euo pipefail
@@ -23,7 +21,15 @@ cd "$PROJECT_ROOT"
 mkdir -p slurm_logs
 mkdir -p .cache/triton
 
-module load Anaconda3/2025.06-1
+module load slurm
+module load cuda12.2/toolkit/12.2.2
+
+export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
+export REPO_ROOT=/home/dduab/jiayusheng/SpatialStack
+export SS_ROOT=/project/peilab/jys/spatialstack_store
+export HF_HOME=$SS_ROOT/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export HF_XET_HIGH_PERFORMANCE=1
 
 QWEN35_ENV_ROOT="${QWEN35_ENV_ROOT:-$HOME/.conda/envs/spatialstack-qwen35}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
@@ -76,4 +82,4 @@ echo "[INFO] triton_cache_dir=$TRITON_CACHE_DIR"
 echo "[INFO] cuda_home=$CUDA_HOME"
 echo "[INFO] qwen35_env_root=$QWEN35_ENV_ROOT"
 
-srun --ntasks="${SLURM_JOB_NUM_NODES:-8}" --ntasks-per-node=1 bash scripts/train/train.sh
+bash scripts/train/train.sh
