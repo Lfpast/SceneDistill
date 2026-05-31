@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=qwen35
+#SBATCH --job-name=qwen35-sbatch
 #SBATCH --partition=normal            # Change to your cluster's GPU partition
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
@@ -21,6 +21,7 @@ cd "$PROJECT_ROOT"
 mkdir -p slurm_logs
 mkdir -p .cache/triton
 
+conda activate spatialstack
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 
