@@ -12,6 +12,8 @@ export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export LD_PRELOAD=/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+
+export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 ```
 
 **yjiaag version**
@@ -26,5 +28,7 @@ export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+
+export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 ```
 补充datasets, deepspeed, opencv-python-headless lib
