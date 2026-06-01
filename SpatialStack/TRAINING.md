@@ -168,12 +168,11 @@ with `VGGT-Omega`:
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
 GEOMETRY_ENCODER_TYPE=vggt_omega \
-GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+GEOMETRY_ENCODER_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt \
 FEATURE_FUSION_METHOD=deepstack_language_add \
 GEOMETRY_ENCODER_LAYERS="11 17 23" \
 GEOMETRY_FUSION_LAYERS="0 1 2" \
 DATA_FLATTEN=False \
-OUTPUT_DIR=./output/spatialstack_qwen35_train_omega \
 bash scripts/train/train.sh
 ```
 
