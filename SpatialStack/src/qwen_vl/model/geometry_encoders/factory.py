@@ -3,6 +3,7 @@
 from typing import Optional
 from .base import BaseGeometryEncoder, GeometryEncoderConfig
 from .vggt_encoder import VGGTEncoder
+from .vggt_omega_encoder import VGGTOmegaEncoder
 from .pi3_encoder import Pi3Encoder
 
 
@@ -17,7 +18,7 @@ def create_geometry_encoder(
     Factory function to create geometry encoders.
     
     Args:
-        encoder_type: Type of encoder ("vggt", "pi3", etc.)
+        encoder_type: Type of encoder ("vggt", "vggt_omega", "pi3", etc.)
         model_path: Path to pretrained model
         reference_frame: Reference frame setting
         freeze_encoder: Whether to freeze encoder parameters
@@ -36,6 +37,8 @@ def create_geometry_encoder(
     
     if encoder_type == "vggt":
         return VGGTEncoder(config)
+    elif encoder_type == "vggt_omega":
+        return VGGTOmegaEncoder(config)
     elif encoder_type == "pi3":
         return Pi3Encoder(config)
     else:
@@ -44,4 +47,4 @@ def create_geometry_encoder(
 
 def get_available_encoders():
     """Get list of available encoder types."""
-    return ["vggt", "pi3"]
+    return ["vggt", "vggt_omega", "pi3"]

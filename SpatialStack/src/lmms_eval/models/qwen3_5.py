@@ -18,6 +18,7 @@ from lmms_eval.api.instance import Instance
 from lmms_eval.api.model import lmms
 from lmms_eval.api.registry import register_model
 from lmms_eval.models.model_utils.load_video import read_video_pyav_pil
+from qwen_vl.data.utils import build_qwen3_5_geometry_inputs
 
 
 MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.3.0")
@@ -70,38 +71,6 @@ def detect_qwen3_5_fast_path_runtime():
         except ImportError:
             runtime[module_name] = False
     return runtime
-
-
-def build_qwen3_5_geometry_inputs(images, image_grid_thw, patch_size: int = 14):
-    geometry_tensors = []
-    max_height = 0
-    max_width = 0
-
-    for image, grid in zip(images, image_grid_thw):
-        _, grid_h, grid_w = [int(v) for v in grid.tolist()]
-        target_height = grid_h * patch_size
-        target_width = grid_w * patch_size
-        resized = image.resize((target_width, target_height), Image.Resampling.BICUBIC)
-        tensor = torch.from_numpy(np.array(resized, copy=True)).permute(2, 0, 1).float() / 255.0
-        geometry_tensors.append(tensor)
-        max_height = max(max_height, target_height)
-        max_width = max(max_width, target_width)
-
-    padded_tensors = []
-    for tensor in geometry_tensors:
-        h_padding = max_height - tensor.shape[1]
-        w_padding = max_width - tensor.shape[2]
-        if h_padding > 0 or w_padding > 0:
-            pad_top = h_padding // 2
-            pad_bottom = h_padding - pad_top
-            pad_left = w_padding // 2
-            pad_right = w_padding - pad_left
-            tensor = torch.nn.functional.pad(
-                tensor, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-            )
-        padded_tensors.append(tensor)
-
-    return padded_tensors
 
 
 def move_qwen3_5_eval_inputs_to_device(inputs, device):
@@ -407,6 +376,7 @@ class Qwen3_5(lmms):
                 geometry_encoder_inputs = build_qwen3_5_geometry_inputs(
                     sample_images[0],
                     inputs["image_grid_thw"],
+                    geometry_encoder_type=getattr(self.config, "geometry_encoder_type", "vggt"),
                 )
                 inputs["geometry_encoder_inputs"] = [torch.stack(geometry_encoder_inputs)]
             preprocess_elapsed = time.perf_counter() - batch_start

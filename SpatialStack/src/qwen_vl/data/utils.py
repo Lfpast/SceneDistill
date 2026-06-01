@@ -11,7 +11,14 @@ import numpy as np
 import copy
 
 
-GEOMETRY_ENCODER_PATCH_SIZE = 14
+GEOMETRY_ENCODER_PATCH_SIZES = {
+    "vggt": 14,
+    "vggt_omega": 16,
+}
+
+
+def get_geometry_encoder_patch_size(geometry_encoder_type: str = "vggt") -> int:
+    return GEOMETRY_ENCODER_PATCH_SIZES.get(geometry_encoder_type, 14)
 
 
 def _load_rgb_image(image_path):
@@ -154,7 +161,41 @@ def load_and_preprocess_images(image_path_list, mode="crop", target_size=518):
     return images
 
 
-def prepare_image_inputs(image, image_processor, model_type="qwen2.5vl"):
+def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type: str = "vggt"):
+    geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
+    geometry_tensors = []
+    max_height = 0
+    max_width = 0
+
+    for image, grid in zip(images, image_grid_thw):
+        rgb_image = _load_rgb_image(image)
+        _, grid_h, grid_w = [int(v) for v in grid.tolist()]
+        target_height = grid_h * geometry_patch_size
+        target_width = grid_w * geometry_patch_size
+        resized = rgb_image.resize((target_width, target_height), Image.Resampling.BICUBIC)
+        tensor = TF.ToTensor()(resized)
+        geometry_tensors.append(tensor)
+        max_height = max(max_height, target_height)
+        max_width = max(max_width, target_width)
+
+    padded_tensors = []
+    for tensor in geometry_tensors:
+        h_padding = max_height - tensor.shape[1]
+        w_padding = max_width - tensor.shape[2]
+        if h_padding > 0 or w_padding > 0:
+            pad_top = h_padding // 2
+            pad_bottom = h_padding - pad_top
+            pad_left = w_padding // 2
+            pad_right = w_padding - pad_left
+            tensor = torch.nn.functional.pad(
+                tensor, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
+            )
+        padded_tensors.append(tensor)
+
+    return padded_tensors
+
+
+def prepare_image_inputs(image, image_processor, model_type="qwen2.5vl", geometry_encoder_type: str = "vggt"):
     images = load_and_preprocess_images([image])
     merge_size: int = getattr(image_processor, "merge_size")
     patch_size: int = getattr(image_processor, "patch_size")
@@ -171,12 +212,9 @@ def prepare_image_inputs(image, image_processor, model_type="qwen2.5vl"):
     grid_thw = visual_processed["image_grid_thw"]
 
     if model_type == "qwen3.5":
-        rgb_image = _load_rgb_image(image)
-        _, grid_h, grid_w = grid_thw[0].tolist()
-        geometry_width = grid_w * GEOMETRY_ENCODER_PATCH_SIZE
-        geometry_height = grid_h * GEOMETRY_ENCODER_PATCH_SIZE
-        geometry_image = rgb_image.resize((geometry_width, geometry_height), Image.Resampling.BICUBIC)
-        geometry_encoder_inputs = TF.ToTensor()(geometry_image)
+        geometry_encoder_inputs = build_qwen3_5_geometry_inputs(
+            [image], grid_thw, geometry_encoder_type=geometry_encoder_type
+        )[0]
     else:
         geometry_encoder_inputs = copy.deepcopy(images[0])
 

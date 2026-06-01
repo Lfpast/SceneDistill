@@ -105,10 +105,10 @@ python - <<'PY'
 import torch, transformers, qwen_vl_utils, causal_conv1d, fla, decord
 print("torch", torch.__version__, "cuda", torch.version.cuda)
 print("transformers", transformers.__version__)
-print("qwen_vl_utils", qwen_vl_utils.__version__)
-print("causal_conv1d", causal_conv1d.__version__)
-print("fla", fla.__version__)
-print("decord", decord.__version__)
+print("qwen_vl_utils", package_version("qwen-vl-utils", qwen_vl_utils))
+print("causal_conv1d", package_version("causal-conv1d", causal_conv1d))
+print("fla", package_version("flash-linear-attention", fla))
+print("decord", package_version("decord", decord))
 PY
 ```
 
@@ -217,6 +217,7 @@ Train SpatialStack from the `Qwen/Qwen3.5-4B` base model with geometry enabled:
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt \
 GEOMETRY_ENCODER_PATH=facebook/VGGT-1B \
 FEATURE_FUSION_METHOD=deepstack_language_add \
 GEOMETRY_ENCODER_LAYERS="11 17 23" \
@@ -226,12 +227,35 @@ OUTPUT_DIR=./output/spatialstack_qwen35_train \
 bash scripts/train/train.sh
 ```
 
+Switch the geometry encoder to `VGGT-Omega` while preserving the same SpatialStack
+fusion path:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+FEATURE_FUSION_METHOD=deepstack_language_add \
+GEOMETRY_ENCODER_LAYERS="11 17 23" \
+GEOMETRY_FUSION_LAYERS="0 1 2" \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/spatialstack_qwen35_train_omega \
+bash scripts/train/train.sh
+```
+
+`GEOMETRY_ENCODER_PATH` for `vggt_omega` accepts a local `.pt` checkpoint, a local
+directory containing `vggt_omega_1b_512.pt`, or the gated Hugging Face repo id
+`facebook/VGGT-Omega`. This Phase 1 integration keeps Omega frozen and still
+uses patch tokens only; scene/register/text-alignment outputs are not fused into
+the LLM yet.
+
 For multi-node Slurm runs (8 nodes x 8 H200 GPUs), override the same geometry
 settings when submitting the reference script:
 
 ```bash
 MODEL_PATH=/path/to/local/qwen35_snapshot \
 USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt \
 GEOMETRY_ENCODER_PATH=facebook/VGGT-1B \
 FEATURE_FUSION_METHOD=deepstack_language_add \
 GEOMETRY_ENCODER_LAYERS="11 17 23" \

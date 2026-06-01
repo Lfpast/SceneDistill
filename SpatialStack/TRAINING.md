@@ -10,6 +10,7 @@ the geometry encoder enabled. Its geometry settings match the released
 `Journey9ni/SpatialStack-Qwen3.5-4B` checkpoint:
 
 - `USE_GEOMETRY_ENCODER=True`
+- `GEOMETRY_ENCODER_TYPE=vggt`
 - `GEOMETRY_ENCODER_PATH=facebook/VGGT-1B`
 - `FEATURE_FUSION_METHOD=deepstack_language_add`
 - `GEOMETRY_ENCODER_LAYERS="11 17 23"`
@@ -151,6 +152,7 @@ launch:
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt \
 GEOMETRY_ENCODER_PATH=facebook/VGGT-1B \
 FEATURE_FUSION_METHOD=deepstack_language_add \
 GEOMETRY_ENCODER_LAYERS="11 17 23" \
@@ -158,6 +160,27 @@ GEOMETRY_FUSION_LAYERS="0 1 2" \
 DATA_FLATTEN=False \
 bash scripts/train/train.sh
 ```
+
+To keep the same SpatialStack fusion recipe but replace the geometry encoder
+with `VGGT-Omega`:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+FEATURE_FUSION_METHOD=deepstack_language_add \
+GEOMETRY_ENCODER_LAYERS="11 17 23" \
+GEOMETRY_FUSION_LAYERS="0 1 2" \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/spatialstack_qwen35_train_omega \
+bash scripts/train/train.sh
+```
+
+For `vggt_omega`, `GEOMETRY_ENCODER_PATH` accepts a local `.pt` file, a local
+directory containing `vggt_omega_1b_512.pt`, or the gated Hugging Face repo id
+`facebook/VGGT-Omega`. The current integration freezes Omega and reuses only its
+patch-token features; scene/register/text-alignment outputs remain unused.
 
 Qwen3.5 notes:
 

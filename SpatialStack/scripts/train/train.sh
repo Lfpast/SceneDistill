@@ -96,7 +96,7 @@ echo ">>>>> grad accum = $GRADIENT_ACCUMULATION_STEPS"
 # Model Configuration
 # ======================
 DATASETS="${DATASETS:-spar_234k%60,llava_hound_64k%60,vlm3r_scannet%60,vsi_appr_order%50}"             # [DataArguments] Dataset list
-GEOMETRY_ENCODER_TYPE="${GEOMETRY_ENCODER_TYPE:-vggt}"
+GEOMETRY_ENCODER_TYPE="${GEOMETRY_ENCODER_TYPE:-vggt}"                  # vggt | vggt_omega | pi3
 USE_GEOMETRY_ENCODER="${USE_GEOMETRY_ENCODER:-true}"
 DATA_FLATTEN="${DATA_FLATTEN:-False}"
 FEATURE_FUSION_METHOD="${FEATURE_FUSION_METHOD:-deepstack_language_add}"
