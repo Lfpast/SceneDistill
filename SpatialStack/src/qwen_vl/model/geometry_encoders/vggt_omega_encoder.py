@@ -83,6 +83,16 @@ def _resolve_vggt_omega_checkpoint(model_path: str) -> Path:
     return checkpoint_path
 
 
+def _extract_model_state_dict(raw_state_dict: dict) -> dict:
+    if not isinstance(raw_state_dict, dict):
+        raise TypeError(f"Expected VGGT-Omega checkpoint to deserialize to a dict, got {type(raw_state_dict)!r}.")
+
+    if "state_dict" in raw_state_dict and isinstance(raw_state_dict["state_dict"], dict):
+        return raw_state_dict["state_dict"]
+
+    return raw_state_dict
+
+
 class VGGTOmegaEncoder(BaseGeometryEncoder):
     """VGGT-Omega geometry encoder wrapper."""
 
@@ -180,8 +190,21 @@ class VGGTOmegaEncoder(BaseGeometryEncoder):
     def load_model(self, model_path: str) -> None:
         """Load pretrained VGGT-Omega checkpoint from local path or HF repo id."""
         checkpoint_path = _resolve_vggt_omega_checkpoint(model_path)
-        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        self.vggt_omega.load_state_dict(state_dict, strict=True)
+        raw_state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        state_dict = _extract_model_state_dict(raw_state_dict)
+
+        expected_state_dict = self.vggt_omega.state_dict()
+        filtered_state_dict = {
+            key: value for key, value in state_dict.items() if key in expected_state_dict
+        }
+        missing_keys = sorted(set(expected_state_dict.keys()) - set(filtered_state_dict.keys()))
+        if missing_keys:
+            raise RuntimeError(
+                "VGGT-Omega checkpoint is missing weights required by the SpatialStack encoder-only adapter. "
+                f"Missing keys include: {missing_keys[:8]}"
+            )
+
+        self.vggt_omega.load_state_dict(filtered_state_dict, strict=True)
 
         if self.freeze_encoder:
             for param in self.vggt_omega.parameters():

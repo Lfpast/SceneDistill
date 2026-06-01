@@ -80,6 +80,7 @@ mkdir -p "$OUTPUT_DIR"
 # ======================
 LR="${LR:-1e-5}"
 total_batch_size="${TOTAL_BATCH_SIZE:-64}"
+WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
 
 if [ "$WORLD_SIZE" -gt 0 ]; then
     GRADIENT_ACCUMULATION_STEPS=$(( total_batch_size / WORLD_SIZE ))
@@ -129,7 +130,6 @@ train_args=(
          --video_max_frame_pixels $((1664*28*28))
          --video_min_frame_pixels $((256*28*28))
          --num_train_epochs 1
-         --warmup_ratio 0.03
          --lr_scheduler_type cosine
          --weight_decay 0.01
          --logging_steps 10

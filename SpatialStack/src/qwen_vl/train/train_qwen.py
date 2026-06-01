@@ -17,6 +17,7 @@
 import os
 import logging
 import pathlib
+import math
 import torch
 import decord # must import decord after torch and before torchvision
 import transformers
@@ -113,6 +114,40 @@ def set_model(model_args, model):
         # vggt is frozen
         for n, p in model.geometry_encoder.named_parameters():
             p.requires_grad = False
+
+
+def configure_warmup_steps(training_args, train_dataset):
+    """Convert deprecated warmup_ratio usage into explicit warmup_steps."""
+    if training_args.warmup_steps and training_args.warmup_steps > 0:
+        return
+
+    warmup_ratio = float(getattr(training_args, "warmup_ratio", 0.0) or 0.0)
+    if warmup_ratio <= 0.0:
+        warmup_ratio = float(os.getenv("WARMUP_RATIO", "0") or 0.0)
+    if warmup_ratio <= 0.0:
+        return
+
+    if training_args.max_steps and training_args.max_steps > 0:
+        total_steps = training_args.max_steps
+    else:
+        world_size = max(int(getattr(training_args, "world_size", 1)), 1)
+        global_micro_batch = max(
+            int(training_args.per_device_train_batch_size)
+            * int(training_args.gradient_accumulation_steps)
+            * world_size,
+            1,
+        )
+        steps_per_epoch = math.ceil(len(train_dataset) / global_micro_batch)
+        total_steps = max(math.ceil(steps_per_epoch * float(training_args.num_train_epochs)), 1)
+
+    training_args.warmup_steps = max(math.ceil(total_steps * warmup_ratio), 1)
+    training_args.warmup_ratio = 0.0
+    logging.info(
+        "Using explicit warmup_steps=%s derived from warmup_ratio=%s over total_steps=%s.",
+        training_args.warmup_steps,
+        warmup_ratio,
+        total_steps,
+    )
 
 def train(attn_implementation="flash_attention_2"):
     global local_rank
@@ -286,6 +321,7 @@ def train(attn_implementation="flash_attention_2"):
         setattr(data_args, "use_geometry_encoder", model_args.use_geometry_encoder)
         setattr(data_args, "geometry_encoder_type", model_args.geometry_encoder_type)
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+    configure_warmup_steps(training_args, data_module["train_dataset"])
     trainer = Trainer(
         model=model, processing_class=tokenizer, args=training_args, **data_module
     )
