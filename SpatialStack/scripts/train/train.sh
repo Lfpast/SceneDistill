@@ -72,7 +72,7 @@ GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-1B}"
 
 ###################################### ENV DIVIDER
 OUTPUT_DIR="/project/peilab/jys/qwen3_5_output/baseline"              # Directory for saving checkpoints
-CACHE_DIR="/project/peilab/jys/qwen3_5_output/cache"                  # [TrainingArguments] Cache directory for models
+CACHE_DIR="/project/peilab/jys/spatialstack_store/hf_cache/hub"       # [TrainingArguments] Cache directory for models
 mkdir -p "$OUTPUT_DIR"
 
 # ======================
