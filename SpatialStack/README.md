@@ -174,10 +174,10 @@ python scripts/inference/infer.py \
 ## Evaluation
 
 ```bash
-MODEL_PATH=/project/peilab/jys/qwen3_5_output/baseline \
+MODEL_PATH=/project/peilab/jys/qwen3_5_output/only-replace-vggt-with-omega \
 MODEL_IMPL=qwen3_5 \
 MODEL_ARGS_BASE="pretrained=Journey9ni/SpatialStack-Qwen3.5-4B,disable_thinking=true,max_num_frames=32,max_length=12800" \
-BENCHMARKS="vsibench" \
+BENCHMARKS="vsibench, cvbench" \
 bash scripts/evaluation/eval.sh
 ```
 

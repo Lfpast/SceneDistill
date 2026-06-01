@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-export LD_PRELOAD=/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
 
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
     PROJECT_ROOT="${PROJECT_ROOT:-$SLURM_SUBMIT_DIR}"
@@ -67,8 +66,8 @@ VERBOSITY="${VERBOSITY:-INFO}"
 # FORCE_OUTPUT_PATH="/project/peilab/jys/eval_locked_logs/20240601"
 # FORCE_OUTPUT_ROOT="/project/peilab/jys/eval_locked_logs"
 # ---------------------------------------------------------------------------
-FORCE_OUTPUT_PATH="/project/peilab/jys/qwen3_5_output/eval/baseline"
-FORCE_OUTPUT_ROOT="/project/peilab/jys/qwen3_5_output/eval"
+FORCE_OUTPUT_PATH="/home/dduab/jiayusheng/SpatialStack-omega/eval/only-replace-vggt-with-omega"
+FORCE_OUTPUT_ROOT="/home/dduab/jiayusheng/SpatialStack-omega/eval/"
 
 if [[ -n "${FORCE_OUTPUT_PATH}" ]]; then
     OUTPUT_PATH="${FORCE_OUTPUT_PATH}"
