@@ -66,7 +66,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
 
         predictions = {}
 
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.amp.autocast("cuda", enabled=True):
             if self.camera_head is not None:
                 pose_enc_list = self.camera_head(aggregated_tokens_list)
                 predictions["pose_enc"] = pose_enc_list[-1]  # pose encoding of the last iteration
@@ -98,4 +98,3 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             predictions["images"] = images  # store the images for visualization during inference
 
         return predictions
-

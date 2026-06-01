@@ -1,8 +1,10 @@
 """VGGT geometry encoder implementation."""
 
+from contextlib import nullcontext
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional, List
 
 from .base import BaseGeometryEncoder, GeometryEncoderConfig
 
@@ -26,6 +28,13 @@ class VGGTEncoder(BaseGeometryEncoder):
 
         self.reference_frame = config.reference_frame    
         self.patch_size = 14
+
+    def _autocast_context(self, images: torch.Tensor):
+        if not torch.cuda.is_available():
+            return images.dtype, nullcontext()
+
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        return dtype, torch.amp.autocast("cuda", dtype=dtype)
         
     
     def encode(self, images: torch.Tensor) -> torch.Tensor:
@@ -36,10 +45,10 @@ class VGGTEncoder(BaseGeometryEncoder):
         images = self._apply_reference_frame_transform(images)
 
         # Determine dtype for mixed precision
-        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+        dtype, autocast_context = self._autocast_context(images)
 
         with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=dtype):
+            with autocast_context:
                 aggregated_tokens_list, patch_start_idx = self.vggt.aggregator(images[None])
                 features = aggregated_tokens_list[-2][0, :, patch_start_idx:]
 
@@ -62,10 +71,10 @@ class VGGTEncoder(BaseGeometryEncoder):
         images = self._apply_reference_frame_transform(images)
 
         # Determine dtype for mixed precision
-        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+        dtype, autocast_context = self._autocast_context(images)
 
         with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=dtype):
+            with autocast_context:
                 aggregated_tokens_list, patch_start_idx = self.vggt.aggregator(images[None])
 
         n_image, _, height, width = images.shape

@@ -21,7 +21,7 @@ cd "$PROJECT_ROOT"
 mkdir -p slurm_logs
 mkdir -p .cache/triton
 
-conda activate spatialstack
+source activate spatialstack
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 

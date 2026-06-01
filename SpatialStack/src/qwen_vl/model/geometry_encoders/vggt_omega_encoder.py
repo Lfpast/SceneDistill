@@ -119,12 +119,7 @@ class VGGTOmegaEncoder(BaseGeometryEncoder):
         self.vggt_omega.eval()
         images = self._apply_reference_frame_transform(images)
 
-        if torch.cuda.is_available():
-            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-            autocast_context = torch.autocast(device_type="cuda", dtype=dtype)
-        else:
-            dtype = images.dtype
-            autocast_context = nullcontext()
+        dtype, autocast_context = self._autocast_context(images)
 
         with torch.no_grad():
             with autocast_context:
@@ -156,6 +151,13 @@ class VGGTOmegaEncoder(BaseGeometryEncoder):
             tensor_features.append(patch_tokens.to(dtype).contiguous())
 
         return tensor_features
+
+    def _autocast_context(self, images: torch.Tensor):
+        if not torch.cuda.is_available():
+            return images.dtype, nullcontext()
+
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        return dtype, torch.amp.autocast("cuda", dtype=dtype)
 
     def get_feature_dim(self) -> int:
         """Get VGGT-Omega feature dimension."""
