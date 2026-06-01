@@ -71,7 +71,7 @@ MODEL_PATH="${MODEL_PATH:-Qwen/Qwen2.5-VL-3B-Instruct}"
 GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-1B}"
 
 ###################################### ENV DIVIDER
-OUTPUT_DIR="/project/peilab/jys/qwen3_5_output/baseline"              # Directory for saving checkpoints
+OUTPUT_DIR="/project/peilab/jys/qwen3_5_output/only-replace-vggt-with-omega"              # Directory for saving checkpoints
 CACHE_DIR="/project/peilab/jys/spatialstack_store/hf_cache/hub"       # [TrainingArguments] Cache directory for models
 mkdir -p "$OUTPUT_DIR"
 
@@ -133,8 +133,6 @@ train_args=(
          --lr_scheduler_type cosine
          --weight_decay 0.01
          --logging_steps 10
-         --save_steps 1000
-         --save_total_limit 10
          --deepspeed scripts/zero2_opt.json
          --gradient_checkpointing
          --dataloader_num_workers 4
