@@ -55,9 +55,32 @@ MODEL_ARGS_EXTRA="${MODEL_ARGS_EXTRA:-}"
 GEN_KWARGS="${GEN_KWARGS:-}"
 LIMIT="${LIMIT:-}"
 VERBOSITY="${VERBOSITY:-INFO}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-logs/eval}"
-TIMESTAMP="$(date "+%Y%m%d")"
-OUTPUT_PATH="${OUTPUT_PATH:-${OUTPUT_ROOT}/${TIMESTAMP}}"
+
+# ---------------------------------------------------------------------------
+# Optional: 强制锁定输出目录（用于把所有 eval 日志写到固定路径）
+# 使用方法：
+#  - 直接在此文件中硬编码 `FORCE_OUTPUT_PATH` 为你想要的完整路径（推荐），
+#  - 或者在外部通过环境变量导出 `FORCE_OUTPUT_PATH` 或 `FORCE_OUTPUT_ROOT` 来控制。
+# 逻辑：优先使用 `FORCE_OUTPUT_PATH`（完整路径），其次使用 `FORCE_OUTPUT_ROOT`
+#（会在 root 下追加日期戳，除非同时使用 FORCE_OUTPUT_PATH）。
+# 示例（硬编码）：
+# FORCE_OUTPUT_PATH="/project/peilab/jys/eval_locked_logs/20240601"
+# FORCE_OUTPUT_ROOT="/project/peilab/jys/eval_locked_logs"
+# ---------------------------------------------------------------------------
+FORCE_OUTPUT_PATH="/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/eval/baseline"
+FORCE_OUTPUT_ROOT="/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/eval"
+
+if [[ -n "${FORCE_OUTPUT_PATH}" ]]; then
+    OUTPUT_PATH="${FORCE_OUTPUT_PATH}"
+    OUTPUT_ROOT="$(dirname "${OUTPUT_PATH}")"
+else
+    OUTPUT_ROOT="${OUTPUT_ROOT:-logs/eval}"
+    TIMESTAMP="$(date "+%Y%m%d")"
+    if [[ -n "${FORCE_OUTPUT_ROOT}" ]]; then
+        OUTPUT_ROOT="${FORCE_OUTPUT_ROOT}"
+    fi
+    OUTPUT_PATH="${OUTPUT_PATH:-${OUTPUT_ROOT}/${TIMESTAMP}}"
+fi
 
 mkdir -p "$OUTPUT_PATH"
 echo "[INFO] cuda_home=$CUDA_HOME"

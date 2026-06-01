@@ -177,7 +177,6 @@ python scripts/inference/infer.py \
 MODEL_PATH=Journey9ni/SpatialStack-Qwen3.5-4B \
 MODEL_IMPL=qwen3_5 \
 MODEL_ARGS_BASE="pretrained=Journey9ni/SpatialStack-Qwen3.5-4B,disable_thinking=true,max_num_frames=32,max_length=12800" \
-OUTPUT_ROOT=logs/eval/spatialstack_qwen35_4b \
 BENCHMARKS="vsibench" \
 bash scripts/evaluation/eval.sh
 ```
