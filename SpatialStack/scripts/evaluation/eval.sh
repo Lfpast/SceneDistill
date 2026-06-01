@@ -67,8 +67,8 @@ VERBOSITY="${VERBOSITY:-INFO}"
 # FORCE_OUTPUT_PATH="/project/peilab/jys/eval_locked_logs/20240601"
 # FORCE_OUTPUT_ROOT="/project/peilab/jys/eval_locked_logs"
 # ---------------------------------------------------------------------------
-FORCE_OUTPUT_PATH="/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/eval/baseline"
-FORCE_OUTPUT_ROOT="/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/eval"
+FORCE_OUTPUT_PATH="/home/dduab/jiayusheng/SpatialStack-omega/eval/baseline"
+FORCE_OUTPUT_ROOT="/home/dduab/jiayusheng/SpatialStack-omega/eval"
 
 if [[ -n "${FORCE_OUTPUT_PATH}" ]]; then
     OUTPUT_PATH="${FORCE_OUTPUT_PATH}"
