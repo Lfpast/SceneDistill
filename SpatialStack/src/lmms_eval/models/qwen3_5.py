@@ -23,6 +23,7 @@ from qwen_vl.data.utils import (
     build_qwen3_5_geometry_inputs,
     expand_visual_placeholders,
     get_qwen3_5_visual_token_count,
+    get_vggt_omega_alpha_visual_layout,
     is_vggt_omega_alpha,
 )
 
@@ -407,9 +408,14 @@ class Qwen3_5(lmms):
                 if uses_alpha_geometry:
                     inputs["alpha_geometry_inputs"] = [torch.stack(geometry_encoder_inputs)]
                     inputs["alpha_visual_token_layout"] = [
-                        torch.tensor(
-                            [[1, 17, count - 17] for count in visual_token_counts],
-                            dtype=torch.long,
+                        torch.stack(
+                            [
+                                get_vggt_omega_alpha_visual_layout(
+                                    grid,
+                                    spatial_merge_size=self.processor.image_processor.merge_size,
+                                )
+                                for grid in inputs["image_grid_thw"]
+                            ]
                         )
                     ]
                     position_ids, _ = get_rope_index_35_alpha(

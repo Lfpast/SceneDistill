@@ -21,6 +21,7 @@ from qwen_vl.data.utils import (
     build_qwen3_5_geometry_inputs,
     expand_visual_placeholders,
     get_qwen3_5_visual_token_count,
+    get_vggt_omega_alpha_visual_layout,
     is_vggt_omega_alpha,
     load_and_preprocess_images,
 )
@@ -336,12 +337,14 @@ def main():
                 )
             ]
             alpha_layout = [
-                torch.tensor(
+                torch.stack(
                     [
-                        [1, 17, count - 17]
-                        for count in visual_token_counts
-                    ],
-                    dtype=torch.long,
+                        get_vggt_omega_alpha_visual_layout(
+                            grid,
+                            spatial_merge_size=processor.image_processor.merge_size,
+                        )
+                        for grid in model_inputs["image_grid_thw"]
+                    ]
                 )
             ]
             model_inputs["alpha_visual_token_layout"] = alpha_layout

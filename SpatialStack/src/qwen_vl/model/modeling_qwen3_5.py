@@ -694,7 +694,12 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
                 flat_alpha_layout = torch.cat(alpha_visual_token_layout, dim=0)
             else:
                 flat_alpha_layout = alpha_visual_token_layout
-        split_sizes = image_grid_thw.prod(-1).tolist()
+        spatial_merge_size = getattr(self.config.vision_config, "spatial_merge_size", 2)
+        split_sizes = (
+            image_grid_thw[:, 0]
+            * (image_grid_thw[:, 1] // spatial_merge_size)
+            * (image_grid_thw[:, 2] // spatial_merge_size)
+        ).tolist()
         per_image_patch_embeds = torch.split(image_embeds, split_sizes, dim=0)
         if len(per_image_patch_embeds) != alpha_geometry_embeds.shape[0]:
             raise ValueError(
@@ -711,7 +716,7 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
                     "vggt_omega_alpha currently expects image-style Qwen3.5 spans with temporal grid size 1, "
                     f"but got t={t} for image span {image_idx}."
                 )
-            expected_patch_tokens = h * w
+            expected_patch_tokens = (h // spatial_merge_size) * (w // spatial_merge_size)
             if patch_embed.shape[0] != expected_patch_tokens:
                 raise ValueError(
                     f"Unexpected Qwen3.5 image embed length for alpha packing: got {patch_embed.shape[0]}, "

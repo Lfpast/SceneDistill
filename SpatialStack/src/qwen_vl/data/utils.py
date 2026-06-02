@@ -48,11 +48,6 @@ def get_qwen3_5_visual_token_count(
 
 def get_vggt_omega_alpha_visual_layout(grid_thw, spatial_merge_size: int) -> torch.Tensor:
     t, merged_h, merged_w = _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size)
-    if merged_h * merged_w != 196:
-        raise ValueError(
-            "vggt_omega_alpha requires each Qwen3.5 visual span to contain exactly 196 patch tokens per frame "
-            f"after merge, but got {merged_h * merged_w} from grid_thw={grid_thw.tolist()}."
-        )
     return torch.tensor(
         [t, VGGT_OMEGA_ALPHA_SPECIAL_TOKENS_PER_FRAME, merged_h * merged_w],
         dtype=torch.long,
@@ -225,7 +220,6 @@ def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type:
     for image, grid in zip(images, image_grid_thw):
         rgb_image = _load_rgb_image(image)
         if is_vggt_omega_alpha(geometry_encoder_type):
-            get_vggt_omega_alpha_visual_layout(grid, spatial_merge_size=2)
             target_height = VGGT_OMEGA_ALPHA_INPUT_SIZE
             target_width = VGGT_OMEGA_ALPHA_INPUT_SIZE
         else:

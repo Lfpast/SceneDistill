@@ -133,6 +133,9 @@ train_args=(
          --lr_scheduler_type cosine
          --weight_decay 0.01
          --logging_steps 10
+         --save_strategy "no"
+         --save_steps 0
+         --save_total_limit 0
          --deepspeed scripts/zero2_opt.json
          --gradient_checkpointing
          --dataloader_num_workers 4
