@@ -18,7 +18,13 @@ from lmms_eval.api.instance import Instance
 from lmms_eval.api.model import lmms
 from lmms_eval.api.registry import register_model
 from lmms_eval.models.model_utils.load_video import read_video_pyav_pil
-from qwen_vl.data.utils import build_qwen3_5_geometry_inputs
+from qwen_vl.data.rope2d import get_rope_index_35_alpha
+from qwen_vl.data.utils import (
+    build_qwen3_5_geometry_inputs,
+    expand_visual_placeholders,
+    get_qwen3_5_visual_token_count,
+    is_vggt_omega_alpha,
+)
 
 
 MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.3.0")
@@ -77,6 +83,10 @@ def move_qwen3_5_eval_inputs_to_device(inputs, device):
     inputs = inputs.to(device)
     if "geometry_encoder_inputs" in inputs:
         inputs["geometry_encoder_inputs"] = [tensor.to(device) for tensor in inputs["geometry_encoder_inputs"]]
+    if "alpha_geometry_inputs" in inputs:
+        inputs["alpha_geometry_inputs"] = [tensor.to(device) for tensor in inputs["alpha_geometry_inputs"]]
+    if "alpha_visual_token_layout" in inputs:
+        inputs["alpha_visual_token_layout"] = [tensor.to(device) for tensor in inputs["alpha_visual_token_layout"]]
     return inputs
 
 
@@ -363,8 +373,24 @@ class Qwen3_5(lmms):
             if self.disable_thinking:
                 chat_template_kwargs["enable_thinking"] = False
             text = self.processor.apply_chat_template(messages, **chat_template_kwargs)
+            text_batch = text if isinstance(text, list) else [text]
+            geometry_encoder_type = getattr(self.config, "geometry_encoder_type", "vggt")
+            uses_alpha_geometry = self.uses_geometry_encoder_for_eval() and is_vggt_omega_alpha(geometry_encoder_type)
+            if uses_alpha_geometry:
+                if len(sample_images) != 1:
+                    raise ValueError("Qwen3.5 alpha geometry eval currently expects per-device batch size 1.")
+                visual_inputs = self.processor.image_processor(images=sample_images[0], return_tensors="pt")
+                visual_token_counts = [
+                    get_qwen3_5_visual_token_count(
+                        grid,
+                        self.processor.image_processor.merge_size,
+                        geometry_encoder_type=geometry_encoder_type,
+                    )
+                    for grid in visual_inputs["image_grid_thw"]
+                ]
+                text_batch = [expand_visual_placeholders(text_batch[0], visual_token_counts, visual_type="image")]
             inputs = self.processor(
-                text=text,
+                text=text_batch,
                 images=sample_images if any(len(images) > 0 for images in sample_images) else None,
                 videos=None,
                 padding=True,
@@ -376,9 +402,25 @@ class Qwen3_5(lmms):
                 geometry_encoder_inputs = build_qwen3_5_geometry_inputs(
                     sample_images[0],
                     inputs["image_grid_thw"],
-                    geometry_encoder_type=getattr(self.config, "geometry_encoder_type", "vggt"),
+                    geometry_encoder_type=geometry_encoder_type,
                 )
-                inputs["geometry_encoder_inputs"] = [torch.stack(geometry_encoder_inputs)]
+                if uses_alpha_geometry:
+                    inputs["alpha_geometry_inputs"] = [torch.stack(geometry_encoder_inputs)]
+                    inputs["alpha_visual_token_layout"] = [
+                        torch.tensor(
+                            [[1, 17, count - 17] for count in visual_token_counts],
+                            dtype=torch.long,
+                        )
+                    ]
+                    position_ids, _ = get_rope_index_35_alpha(
+                        spatial_merge_size=self.processor.image_processor.merge_size,
+                        input_ids=inputs["input_ids"],
+                        image_grid_thw=inputs["image_grid_thw"],
+                        attention_mask=inputs["attention_mask"],
+                    )
+                    inputs["position_ids"] = position_ids
+                else:
+                    inputs["geometry_encoder_inputs"] = [torch.stack(geometry_encoder_inputs)]
             preprocess_elapsed = time.perf_counter() - batch_start
 
             if self.device_map == "auto":

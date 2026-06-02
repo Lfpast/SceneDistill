@@ -12,7 +12,7 @@ class ModelArguments:
 
     # Geometry encoder configuration
     use_geometry_encoder: bool = field(default=False)  # Whether to use 3D geometry encoder
-    geometry_encoder_type: str = field(default="vggt")  # Type of geometry encoder ("vggt", "vggt_omega", "pi3")
+    geometry_encoder_type: str = field(default="vggt")  # Type of geometry encoder ("vggt", "vggt_omega", "vggt_omega_alpha", "pi3")
     geometry_encoder_path: str = field(default="facebook/VGGT-1B/")  # Path or repo id for the pre-trained geometry encoder
     reference_frame: str = field(default="first")  # Reference frame for geometry encoding ("first", "last"), only available for vggt
     feature_fusion_method: str = field(default="add")  # Method to fuse geometry and visual features ("add", "concat", "cross_attention", "gate")

@@ -181,6 +181,22 @@ directory containing `vggt_omega_1b_512.pt`, or the gated Hugging Face repo id
 `facebook/VGGT-Omega`. The current integration freezes Omega and reuses only its
 patch-token features; scene/register/text-alignment outputs remain unused.
 
+For the Phase2 input-side alpha branch:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega_alpha \
+GEOMETRY_ENCODER_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt \
+DATA_FLATTEN=False \
+bash scripts/train/train.sh
+```
+
+The `vggt_omega_alpha` path keeps Omega frozen, resizes the geometry-side input
+to `224x224`, takes only `1 camera + 16 scene/register tokens` per frame, and
+concatenates the projected 17 tokens directly into the Qwen3.5 visual input
+sequence. It does not use SpatialStack feature fusion modules.
+
 Qwen3.5 notes:
 
 - Keep `USE_GEOMETRY_ENCODER=True`; this is required for SpatialStack geometry

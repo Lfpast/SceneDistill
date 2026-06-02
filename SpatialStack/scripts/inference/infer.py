@@ -16,7 +16,14 @@ from packaging.version import Version
 import transformers
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer
 
-from qwen_vl.data.utils import build_qwen3_5_geometry_inputs, load_and_preprocess_images
+from qwen_vl.data.rope2d import get_rope_index_35_alpha
+from qwen_vl.data.utils import (
+    build_qwen3_5_geometry_inputs,
+    expand_visual_placeholders,
+    get_qwen3_5_visual_token_count,
+    is_vggt_omega_alpha,
+    load_and_preprocess_images,
+)
 
 try:
     from qwen_vl_utils import extract_vision_info
@@ -296,18 +303,64 @@ def main():
     if model_family == "qwen3_5" and args.disable_thinking:
         chat_template_kwargs["enable_thinking"] = False
     text = processor.apply_chat_template(messages, **chat_template_kwargs)
+    text_batch = text if isinstance(text, list) else [text]
     if model_family == "qwen3_5":
         raw_image_inputs = prepare_raw_visual_inputs(messages)
         geometry_encoder_inputs = None
-        model_inputs = processor(
-            text=text,
-            images=raw_image_inputs,
-            videos=None,
-            padding=True,
-            return_tensors="pt",
-        )
-        if use_geometry_model:
-            geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
+        geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
+        if use_geometry_model and is_vggt_omega_alpha(geometry_encoder_type):
+            visual_inputs = processor.image_processor(images=raw_image_inputs, return_tensors="pt")
+            visual_token_counts = [
+                get_qwen3_5_visual_token_count(
+                    grid,
+                    processor.image_processor.merge_size,
+                    geometry_encoder_type=geometry_encoder_type,
+                )
+                for grid in visual_inputs["image_grid_thw"]
+            ]
+            text_batch = [expand_visual_placeholders(text_batch[0], visual_token_counts, visual_type="image")]
+            model_inputs = processor(
+                text=text_batch,
+                images=raw_image_inputs,
+                videos=None,
+                padding=True,
+                return_tensors="pt",
+            )
+            model_inputs["alpha_geometry_inputs"] = [
+                torch.stack(
+                    build_qwen3_5_geometry_inputs(
+                        raw_image_inputs,
+                        model_inputs["image_grid_thw"],
+                        geometry_encoder_type=geometry_encoder_type,
+                    )
+                )
+            ]
+            alpha_layout = [
+                torch.tensor(
+                    [
+                        [1, 17, count - 17]
+                        for count in visual_token_counts
+                    ],
+                    dtype=torch.long,
+                )
+            ]
+            model_inputs["alpha_visual_token_layout"] = alpha_layout
+            position_ids, _ = get_rope_index_35_alpha(
+                spatial_merge_size=processor.image_processor.merge_size,
+                input_ids=model_inputs["input_ids"],
+                image_grid_thw=model_inputs["image_grid_thw"],
+                attention_mask=model_inputs["attention_mask"],
+            )
+            model_inputs["position_ids"] = position_ids
+        else:
+            model_inputs = processor(
+                text=text_batch,
+                images=raw_image_inputs,
+                videos=None,
+                padding=True,
+                return_tensors="pt",
+            )
+        if use_geometry_model and not is_vggt_omega_alpha(geometry_encoder_type):
             geometry_encoder_inputs = [
                 torch.stack(
                     build_qwen3_5_geometry_inputs(
@@ -320,7 +373,7 @@ def main():
     else:
         image_inputs, geometry_encoder_inputs = prepare_visual_inputs(messages, processor)
         model_inputs = processor(
-            text=text,
+            text=text_batch,
             images=image_inputs,
             videos=None,
             padding=True,
@@ -329,7 +382,12 @@ def main():
         )
 
     if use_geometry_model:
-        model_inputs["geometry_encoder_inputs"] = [feat.to(args.device) for feat in geometry_encoder_inputs]
+        if geometry_encoder_inputs is not None:
+            model_inputs["geometry_encoder_inputs"] = [feat.to(args.device) for feat in geometry_encoder_inputs]
+        if "alpha_geometry_inputs" in model_inputs:
+            model_inputs["alpha_geometry_inputs"] = [feat.to(args.device) for feat in model_inputs["alpha_geometry_inputs"]]
+        if "alpha_visual_token_layout" in model_inputs:
+            model_inputs["alpha_visual_token_layout"] = [feat.to(args.device) for feat in model_inputs["alpha_visual_token_layout"]]
     model_inputs = model_inputs.to(args.device)
 
     output_ids = model.generate(
