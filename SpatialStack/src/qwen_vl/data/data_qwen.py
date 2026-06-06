@@ -22,8 +22,8 @@ from decord import VideoReader
 import transformers
 
 from . import data_list
-from .rope2d import get_rope_index_25, get_rope_index_2, get_rope_index_35, get_rope_index_35_alpha
-from .utils import get_qwen3_5_visual_token_count, is_vggt_omega_alpha, prepare_image_inputs
+from .rope2d import get_rope_index_25, get_rope_index_2, get_rope_index_35
+from .utils import get_qwen3_5_visual_token_count, prepare_image_inputs
 
 IGNORE_INDEX = -100
 IMAGE_TOKEN_INDEX = 151655
@@ -215,10 +215,7 @@ class LazySupervisedDataset(Dataset):
         if data_args.model_type == "qwen2.5vl":
             self.get_rope_index = get_rope_index_25
         elif data_args.model_type == "qwen3.5":
-            if is_vggt_omega_alpha(getattr(data_args, "geometry_encoder_type", "vggt")):
-                self.get_rope_index = get_rope_index_35_alpha
-            else:
-                self.get_rope_index = get_rope_index_35
+            self.get_rope_index = get_rope_index_35
         else:
             self.get_rope_index = get_rope_index_2
 
@@ -274,12 +271,7 @@ class LazySupervisedDataset(Dataset):
                 image_num = getattr(self.data_args, "video_max_frames", 8)
             else:
                 image_num = 0
-            per_image_length = 252
-            if self.model_type == "qwen3.5" and is_vggt_omega_alpha(
-                getattr(self.data_args, "geometry_encoder_type", "vggt")
-            ):
-                per_image_length += 17
-            length_list.append(image_num * per_image_length + cur_len)
+            length_list.append(image_num * 252 + cur_len)
         return length_list
 
     @property
@@ -297,12 +289,7 @@ class LazySupervisedDataset(Dataset):
                 image_num = getattr(self.data_args, "video_max_frames", 8)
             else:
                 image_num = 0
-            per_image_length = 252
-            if self.model_type == "qwen3.5" and is_vggt_omega_alpha(
-                getattr(self.data_args, "geometry_encoder_type", "vggt")
-            ):
-                per_image_length += 17
-            cur_len += image_num * per_image_length
+            cur_len += image_num * 252
             tag = sample.get("tag", "2d")
             cur_len = -cur_len if tag == "2d" else cur_len
             length_list.append(cur_len)
@@ -508,7 +495,6 @@ class LazySupervisedDataset(Dataset):
                 self.draw_visual_marks(image_file, sources[0].get("spar_info", None))
 
                 image, grid_thw, geometry_encoder_inputs = [], [], []
-                alpha_geometry_inputs, alpha_visual_token_layout = [], []
                 for file in image_file:
                     ret = prepare_image_inputs(
                         file,
@@ -517,30 +503,22 @@ class LazySupervisedDataset(Dataset):
                         geometry_encoder_type=getattr(self.data_args, "geometry_encoder_type", "vggt"),
                     )
                     image.append(ret["pixel_values"])
+                    geometry_encoder_inputs.append(ret["geometry_encoder_inputs"])
                     grid_thw.append(ret["image_grid_thw"])
-                    if "geometry_encoder_inputs" in ret:
-                        geometry_encoder_inputs.append(ret["geometry_encoder_inputs"])
-                    if "alpha_geometry_inputs" in ret:
-                        alpha_geometry_inputs.append(ret["alpha_geometry_inputs"])
-                        alpha_visual_token_layout.append(ret["alpha_visual_token_layout"])
             else:
                 raise NotImplementedError
 
-            if self.model_type == "qwen3.5":
-                grid_thw_merged = [
-                    get_qwen3_5_visual_token_count(
-                        merged_thw,
-                        self.data_args.image_processor.merge_size,
-                        geometry_encoder_type=getattr(self.data_args, "geometry_encoder_type", "vggt"),
-                    )
-                    for merged_thw in copy.deepcopy(grid_thw)
-                ]
-            else:
-                grid_thw_merged = copy.deepcopy(grid_thw)
-                grid_thw_merged = [
-                    merged_thw.prod() // self.data_args.image_processor.merge_size**2
-                    for merged_thw in grid_thw_merged
-                ]
+            grid_thw_merged = copy.deepcopy(grid_thw)
+            grid_thw_merged = [
+                get_qwen3_5_visual_token_count(
+                    merged_thw,
+                    self.data_args.image_processor.merge_size,
+                    geometry_encoder_type=getattr(self.data_args, "geometry_encoder_type", "vggt"),
+                )
+                if self.model_type == "qwen3.5"
+                else merged_thw.prod() // self.data_args.image_processor.merge_size**2
+                for merged_thw in grid_thw_merged
+            ]
             sources = copy.deepcopy([e["conversations"] for e in sources])
             data_dict = preprocess_qwen_2_visual(
                 sources,
@@ -622,11 +600,7 @@ class LazySupervisedDataset(Dataset):
             data_dict["pixel_values"] = image
             data_dict["image_grid_thw"] = grid_thw
             if getattr(self.data_args, "use_geometry_encoder", False):
-                if is_vggt_omega_alpha(getattr(self.data_args, "geometry_encoder_type", "vggt")):
-                    data_dict["alpha_geometry_inputs"] = alpha_geometry_inputs
-                    data_dict["alpha_visual_token_layout"] = alpha_visual_token_layout
-                else:
-                    data_dict["geometry_encoder_inputs"] = geometry_encoder_inputs
+                data_dict["geometry_encoder_inputs"] = geometry_encoder_inputs
         # video exist in the data
         elif "video" in self.list_data_dict[i]:
             data_dict["pixel_values_videos"] = video
@@ -739,14 +713,6 @@ class DataCollatorForSupervisedDataset(object):
             tags = [instance.get("tag", "3d") for instance in instances]
             assert len(set(tags)) == 1, "all data in a batch should have the same tag"
             batch["tag"] = tags[0]
-        if "alpha_geometry_inputs" in instances[0]:
-            alpha_geometry_inputs = [torch.stack(instance["alpha_geometry_inputs"]) for instance in instances]
-            batch["alpha_geometry_inputs"] = alpha_geometry_inputs
-            alpha_visual_token_layout = [torch.stack(instance["alpha_visual_token_layout"]) for instance in instances]
-            batch["alpha_visual_token_layout"] = alpha_visual_token_layout
-            tags = [instance.get("tag", "3d") for instance in instances]
-            assert len(set(tags)) == 1, "all data in a batch should have the same tag"
-            batch["tag"] = tags[0]
         return batch
 
 
@@ -833,10 +799,8 @@ class FlattenedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset
 
                 
         # assume all data in a batch has geometry_encoder_inputs
-        if "geometry_encoder_inputs" in instances[0] or "alpha_geometry_inputs" in instances[0]:
-            raise NotImplementedError(
-                "FlattenedDataCollatorForSupervisedDataset does not support geometry encoder inputs"
-            )
+        if "geometry_encoder_inputs" in instances[0]:
+            raise NotImplementedError("FlattenedDataCollatorForSupervisedDataset does not support geometry_encoder_inputs")
 
         return batch
 

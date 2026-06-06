@@ -20,7 +20,6 @@ from transformers.models.qwen3_5.modeling_qwen3_5 import (
     Qwen3_5TextModel,
 )
 
-from ..data.rope2d import get_rope_index_35_alpha
 from .feature_fusion import (
     FeatureFusionConfig,
     FeatureFusionModule,
@@ -30,12 +29,10 @@ from .feature_fusion import (
 )
 from .geometry_encoders import GeometryEncoderConfig, create_geometry_encoder
 from .position_utils import get_2d_sincos_pos_embed
-from .vggt_omega_alpha_projector import VGGTOmegaAlphaProjector
 
 
 GEOMETRY_STATE_KEYWORDS = (
     "geometry_encoder",
-    "alpha_projector",
     "language_feature_fusion",
     "feature_fusion",
     "geometry_merger",
@@ -44,7 +41,6 @@ GEOMETRY_STATE_KEYWORDS = (
 
 def move_qwen3_5_geometry_modules_to_device(
     geometry_encoder: Optional[nn.Module],
-    alpha_projector: Optional[nn.Module],
     language_feature_fusion: Optional[nn.Module],
     feature_fusion: Optional[nn.Module],
     geometry_merger: Optional[nn.Module],
@@ -56,11 +52,6 @@ def move_qwen3_5_geometry_modules_to_device(
         return
     if geometry_encoder is not None and hasattr(geometry_encoder, "to"):
         geometry_encoder.to(device=device)
-    if alpha_projector is not None and hasattr(alpha_projector, "to"):
-        if dtype is not None:
-            alpha_projector.to(device=device, dtype=dtype)
-        else:
-            alpha_projector.to(device=device)
     if language_feature_fusion is not None and hasattr(language_feature_fusion, "to"):
         if dtype is not None:
             language_feature_fusion.to(device=device, dtype=dtype)
@@ -105,7 +96,6 @@ def align_qwen3_5_geometry_modules(model):
     dtype = getattr(reference_tensor, "dtype", None)
     move_qwen3_5_geometry_modules_to_device(
         getattr(inner_model, "geometry_encoder", None),
-        getattr(inner_model, "alpha_projector", None),
         getattr(inner_model, "language_feature_fusion", None),
         getattr(inner_model, "feature_fusion", None),
         getattr(inner_model, "geometry_merger", None),
@@ -114,7 +104,6 @@ def align_qwen3_5_geometry_modules(model):
         dtype,
     )
     model.geometry_encoder = getattr(inner_model, "geometry_encoder", None)
-    model.alpha_projector = getattr(inner_model, "alpha_projector", None)
     model.language_feature_fusion = getattr(inner_model, "language_feature_fusion", None)
     model.feature_fusion = getattr(inner_model, "feature_fusion", None)
     model.geometry_merger = getattr(inner_model, "geometry_merger", None)
@@ -407,7 +396,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
         super().__init__(config)
         self.language_model = Qwen3_5TextModelWithGeometry(config.text_config)
         self.geometry_encoder = None
-        self.alpha_projector = None
         self.language_feature_fusion = None
         self.feature_fusion = None
         self.geometry_merger = None
@@ -432,8 +420,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
             return False
 
     def _validate_geometry_config(self, config):
-        if getattr(config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha":
-            return
         fusion_method = getattr(config, "feature_fusion_method", "deepstack_language_add")
         if fusion_method == "deepstack_language_add":
             if not getattr(config, "geometry_fusion_layers", None):
@@ -460,7 +446,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
         config = self.config
         self._validate_geometry_config(config)
         fusion_method = getattr(config, "feature_fusion_method", "deepstack_language_add")
-        is_alpha_geometry = getattr(config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha"
 
         encoder_config = GeometryEncoderConfig(
             encoder_type=getattr(config, "geometry_encoder_type", "vggt"),
@@ -475,15 +460,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
             reference_frame=encoder_config.reference_frame,
             freeze_encoder=encoder_config.freeze_encoder,
         )
-
-        if is_alpha_geometry:
-            self.alpha_projector = VGGTOmegaAlphaProjector(
-                input_dim=self.geometry_encoder.get_feature_dim(),
-                output_dim=config.text_config.hidden_size,
-            )
-            self.alpha_projector.apply(self._init_weights)
-            self._geometry_modules_initialized = True
-            return
 
         if fusion_method == "deepstack_language_add":
             use_vision_language_fusion = getattr(config, "vision_language_fusion_layers", None) is not None
@@ -542,7 +518,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
         dtype = getattr(reference_tensor, "dtype", None)
         move_qwen3_5_geometry_modules_to_device(
             getattr(self, "geometry_encoder", None),
-            getattr(self, "alpha_projector", None),
             getattr(self, "language_feature_fusion", None),
             getattr(self, "feature_fusion", None),
             getattr(self, "geometry_merger", None),
@@ -652,85 +627,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
 
         return vision_layer_features
 
-    def _is_alpha_geometry_enabled(self) -> bool:
-        return (
-            getattr(self.config, "use_geometry_encoder", False)
-            and getattr(self.config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha"
-        )
-
-    def _collect_alpha_geometry_embeddings(
-        self,
-        alpha_geometry_inputs,
-        target_device: torch.device,
-        target_dtype: torch.dtype,
-    ) -> Optional[torch.Tensor]:
-        if alpha_geometry_inputs is None:
-            return None
-        if self.geometry_encoder is None or self.alpha_projector is None:
-            self.initialize_geometry_modules()
-        self.align_geometry_modules(reference_tensor=torch.empty(0, device=target_device, dtype=target_dtype))
-
-        alpha_embeddings = []
-        for sample_inputs in alpha_geometry_inputs:
-            if sample_inputs.shape[0] == 0:
-                continue
-            tokens = self.geometry_encoder.encode(sample_inputs).to(device=target_device, dtype=target_dtype)
-            alpha_embeddings.append(self.alpha_projector(tokens))
-
-        if not alpha_embeddings:
-            return None
-        return torch.cat(alpha_embeddings, dim=0)
-
-    def _pack_alpha_image_embeds(
-        self,
-        image_embeds: torch.Tensor,
-        alpha_geometry_embeds: torch.Tensor,
-        image_grid_thw: torch.LongTensor,
-        alpha_visual_token_layout: Optional[List[torch.Tensor]] = None,
-    ) -> torch.Tensor:
-        flat_alpha_layout = None
-        if alpha_visual_token_layout is not None:
-            if isinstance(alpha_visual_token_layout, list):
-                flat_alpha_layout = torch.cat(alpha_visual_token_layout, dim=0)
-            else:
-                flat_alpha_layout = alpha_visual_token_layout
-        spatial_merge_size = getattr(self.config.vision_config, "spatial_merge_size", 2)
-        split_sizes = (
-            image_grid_thw[:, 0]
-            * (image_grid_thw[:, 1] // spatial_merge_size)
-            * (image_grid_thw[:, 2] // spatial_merge_size)
-        ).tolist()
-        per_image_patch_embeds = torch.split(image_embeds, split_sizes, dim=0)
-        if len(per_image_patch_embeds) != alpha_geometry_embeds.shape[0]:
-            raise ValueError(
-                "alpha geometry token count does not match the number of image spans in Qwen3.5 input packing."
-            )
-
-        packed_embeds = []
-        for image_idx, (patch_embed, alpha_embed, grid) in enumerate(
-            zip(per_image_patch_embeds, alpha_geometry_embeds, image_grid_thw)
-        ):
-            t, h, w = [int(v) for v in grid.tolist()]
-            if t != 1:
-                raise ValueError(
-                    "vggt_omega_alpha currently expects image-style Qwen3.5 spans with temporal grid size 1, "
-                    f"but got t={t} for image span {image_idx}."
-                )
-            expected_patch_tokens = (h // spatial_merge_size) * (w // spatial_merge_size)
-            if patch_embed.shape[0] != expected_patch_tokens:
-                raise ValueError(
-                    f"Unexpected Qwen3.5 image embed length for alpha packing: got {patch_embed.shape[0]}, "
-                    f"expected {expected_patch_tokens}."
-                )
-            if flat_alpha_layout is not None:
-                special_tokens = int(flat_alpha_layout[image_idx][1].item())
-                patch_tokens = int(flat_alpha_layout[image_idx][2].item())
-                if alpha_embed.shape[0] != special_tokens or patch_tokens != patch_embed.shape[0]:
-                    raise ValueError("alpha_visual_token_layout does not match alpha geometry or patch token counts.")
-            packed_embeds.append(torch.cat([alpha_embed, patch_embed], dim=0))
-
-        return torch.cat(packed_embeds, dim=0)
-
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -745,8 +641,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
         mm_token_type_ids: torch.IntTensor | None = None,
         cache_position: torch.LongTensor | None = None,
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
-        alpha_geometry_inputs: Optional[List[torch.Tensor]] = None,
-        alpha_visual_token_layout: Optional[List[torch.Tensor]] = None,
         **kwargs,
     ) -> Qwen3_5ModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -757,9 +651,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
 
         fusion_method = getattr(self.config, "feature_fusion_method", "deepstack_language_add")
         use_language_deepstack = fusion_method == "deepstack_language_add"
-        is_alpha_geometry = self._is_alpha_geometry_enabled()
-        if is_alpha_geometry and position_ids is not None:
-            self.rope_deltas = None
         vision_language_fusion_layers = getattr(self.config, "vision_language_fusion_layers", None)
         should_capture_vision_layers = (
             vision_language_fusion_layers is not None
@@ -778,28 +669,11 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
             )
             image_embeds = image_outputs.pooler_output
             image_embeds = torch.cat(image_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
-            if (
-                is_alpha_geometry
-                and alpha_geometry_inputs is not None
-                and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
-            ):
-                alpha_geometry_embeds = self._collect_alpha_geometry_embeddings(
-                    alpha_geometry_inputs,
-                    inputs_embeds.device,
-                    inputs_embeds.dtype,
-                )
-                image_embeds = self._pack_alpha_image_embeds(
-                    image_embeds,
-                    alpha_geometry_embeds,
-                    image_grid_thw,
-                    alpha_visual_token_layout=alpha_visual_token_layout,
-                )
             if should_capture_vision_layers:
                 vision_layer_features = getattr(image_outputs, "hidden_states", None)
             should_fuse_post_merger_geometry = (
                 getattr(self.config, "use_geometry_encoder", False)
                 and geometry_encoder_inputs is not None
-                and not is_alpha_geometry
                 and not use_language_deepstack
                 and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
             )
@@ -835,24 +709,15 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
         if position_ids is None:
-            if is_alpha_geometry and input_ids is not None and image_grid_thw is not None:
-                position_ids, self.rope_deltas = get_rope_index_35_alpha(
-                    spatial_merge_size=self.config.vision_config.spatial_merge_size,
-                    input_ids=input_ids,
-                    image_grid_thw=image_grid_thw,
-                    video_grid_thw=video_grid_thw,
-                    attention_mask=attention_mask,
-                )
-            else:
-                position_ids = self.compute_3d_position_ids(
-                    input_ids=input_ids,
-                    image_grid_thw=image_grid_thw,
-                    video_grid_thw=video_grid_thw,
-                    inputs_embeds=inputs_embeds,
-                    attention_mask=attention_mask,
-                    past_key_values=past_key_values,
-                    mm_token_type_ids=mm_token_type_ids,
-                )
+            position_ids = self.compute_3d_position_ids(
+                input_ids=input_ids,
+                image_grid_thw=image_grid_thw,
+                video_grid_thw=video_grid_thw,
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                mm_token_type_ids=mm_token_type_ids,
+            )
 
         geometry_layer_features = None
         fusion_module = None
@@ -870,7 +735,6 @@ class Qwen3_5ModelWithGeometry(Qwen3_5Model):
                     and geometry_encoder_inputs is not None
                 )
             )
-            and not is_alpha_geometry
         )
         if should_fuse_geometry:
             needs_geometry_encoder = vision_layer_features is None
@@ -914,7 +778,6 @@ class Qwen3_5ForConditionalGenerationWithGeometry(Qwen3_5ForConditionalGeneratio
         Qwen3_5PreTrainedModel.__init__(self, config)
         self.model = Qwen3_5ModelWithGeometry(config)
         self.geometry_encoder = self.model.geometry_encoder
-        self.alpha_projector = self.model.alpha_projector
         self.language_feature_fusion = self.model.language_feature_fusion
         self.feature_fusion = self.model.feature_fusion
         self.geometry_merger = self.model.geometry_merger
@@ -954,8 +817,6 @@ class Qwen3_5ForConditionalGenerationWithGeometry(Qwen3_5ForConditionalGeneratio
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
-        alpha_geometry_inputs: Optional[List[torch.Tensor]] = None,
-        alpha_visual_token_layout: Optional[List[torch.Tensor]] = None,
         tag: Optional[str] = None,
         **kwargs,
     ) -> Qwen3_5CausalLMOutputWithPast:
@@ -972,8 +833,6 @@ class Qwen3_5ForConditionalGenerationWithGeometry(Qwen3_5ForConditionalGeneratio
             cache_position=cache_position,
             mm_token_type_ids=mm_token_type_ids,
             geometry_encoder_inputs=geometry_encoder_inputs,
-            alpha_geometry_inputs=alpha_geometry_inputs,
-            alpha_visual_token_layout=alpha_visual_token_layout,
             **kwargs,
         )
 

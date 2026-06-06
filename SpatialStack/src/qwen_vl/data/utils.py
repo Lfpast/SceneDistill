@@ -14,19 +14,11 @@ import copy
 GEOMETRY_ENCODER_PATCH_SIZES = {
     "vggt": 14,
     "vggt_omega": 16,
-    "vggt_omega_alpha": 16,
 }
-
-VGGT_OMEGA_ALPHA_INPUT_SIZE = 224
-VGGT_OMEGA_ALPHA_SPECIAL_TOKENS_PER_FRAME = 17
 
 
 def get_geometry_encoder_patch_size(geometry_encoder_type: str = "vggt") -> int:
     return GEOMETRY_ENCODER_PATCH_SIZES.get(geometry_encoder_type, 14)
-
-
-def is_vggt_omega_alpha(geometry_encoder_type: str) -> bool:
-    return geometry_encoder_type == "vggt_omega_alpha"
 
 
 def _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size: int) -> tuple[int, int, int]:
@@ -40,18 +32,7 @@ def get_qwen3_5_visual_token_count(
     geometry_encoder_type: str = "vggt",
 ) -> int:
     t, merged_h, merged_w = _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size)
-    patch_tokens = t * merged_h * merged_w
-    if is_vggt_omega_alpha(geometry_encoder_type):
-        return patch_tokens + t * VGGT_OMEGA_ALPHA_SPECIAL_TOKENS_PER_FRAME
-    return patch_tokens
-
-
-def get_vggt_omega_alpha_visual_layout(grid_thw, spatial_merge_size: int) -> torch.Tensor:
-    t, merged_h, merged_w = _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size)
-    return torch.tensor(
-        [t, VGGT_OMEGA_ALPHA_SPECIAL_TOKENS_PER_FRAME, merged_h * merged_w],
-        dtype=torch.long,
-    )
+    return t * merged_h * merged_w
 
 
 def expand_visual_placeholders(text: str, visual_token_counts, visual_type: str = "image") -> str:
@@ -219,14 +200,10 @@ def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type:
 
     for image, grid in zip(images, image_grid_thw):
         rgb_image = _load_rgb_image(image)
-        if is_vggt_omega_alpha(geometry_encoder_type):
-            target_height = VGGT_OMEGA_ALPHA_INPUT_SIZE
-            target_width = VGGT_OMEGA_ALPHA_INPUT_SIZE
-        else:
-            geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
-            _, grid_h, grid_w = [int(v) for v in grid.tolist()]
-            target_height = grid_h * geometry_patch_size
-            target_width = grid_w * geometry_patch_size
+        geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
+        _, grid_h, grid_w = [int(v) for v in grid.tolist()]
+        target_height = grid_h * geometry_patch_size
+        target_width = grid_w * geometry_patch_size
         resized = rgb_image.resize((target_width, target_height), Image.Resampling.BICUBIC)
         tensor = TF.ToTensor()(resized)
         geometry_tensors.append(tensor)
@@ -278,11 +255,4 @@ def prepare_image_inputs(image, image_processor, model_type="qwen2.5vl", geometr
         "image_grid_thw": grid_thw[0],
         "geometry_encoder_inputs": geometry_encoder_inputs,
     }
-    if model_type == "qwen3.5" and is_vggt_omega_alpha(geometry_encoder_type):
-        ret["alpha_geometry_inputs"] = geometry_encoder_inputs
-        ret["alpha_visual_token_layout"] = get_vggt_omega_alpha_visual_layout(
-            grid_thw[0],
-            spatial_merge_size=merge_size,
-        )
-        ret.pop("geometry_encoder_inputs", None)
     return ret

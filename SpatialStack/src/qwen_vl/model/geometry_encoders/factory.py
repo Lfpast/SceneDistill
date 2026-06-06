@@ -4,7 +4,6 @@ from typing import Optional
 from .base import BaseGeometryEncoder, GeometryEncoderConfig
 from .vggt_encoder import VGGTEncoder
 from .vggt_omega_encoder import VGGTOmegaEncoder
-from .vggt_omega_alpha_encoder import VGGTOmegaAlphaEncoder
 from .pi3_encoder import Pi3Encoder
 
 
@@ -40,8 +39,6 @@ def create_geometry_encoder(
         return VGGTEncoder(config)
     elif encoder_type == "vggt_omega":
         return VGGTOmegaEncoder(config)
-    elif encoder_type == "vggt_omega_alpha":
-        return VGGTOmegaAlphaEncoder(config)
     elif encoder_type == "pi3":
         return Pi3Encoder(config)
     else:
@@ -50,4 +47,4 @@ def create_geometry_encoder(
 
 def get_available_encoders():
     """Get list of available encoder types."""
-    return ["vggt", "vggt_omega", "vggt_omega_alpha", "pi3"]
+    return ["vggt", "vggt_omega", "pi3"]
