@@ -1,0 +1,5 @@
+SpatialStack_temp/
+.agents/
+.codex/
+/SpatialStack/scripts/train/train.sh
+/SpatialStack/scripts/evaluation/
