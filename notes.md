@@ -5,6 +5,7 @@ Before training, you should do:
 srun --job-name=qwen35 --nodes=1 --gpus=8 --time=8:00:00 --partition=normal --account=peilab --pty bash
 module load slurm
 module load cuda12.2/toolkit/12.2.2
+cd /home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
 export REPO_ROOT=/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
@@ -21,6 +22,7 @@ export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 srun --job-name=qwen35 --nodes=1 --gpus=8 --time=8:00:00 --partition=normal --account=peilab --pty bash
 module load slurm
 module load cuda12.2/toolkit/12.2.2
+cd /home/yjiaag/SpatialStack-omega/SpatialStack
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
 export REPO_ROOT=/home/yjiaag/SpatialStack-omega/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
