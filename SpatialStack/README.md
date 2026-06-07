@@ -174,9 +174,10 @@ python scripts/inference/infer.py \
 ## Evaluation
 
 ```bash
-MODEL_PATH=Qwen3.5/Qwen3.5-4B \
+MODEL_PATH=/project/peilab/jys/qwen3_5_output/vggt-omega \
 MODEL_IMPL=qwen3_5 \
-MODEL_ARGS_BASE="pretrained=/project/peilab/jys/qwen3_5_output/only-replace-vggt-with-omega,disable_thinking=true,max_num_frames=32,max_length=12800" \
+MODEL_ARGS_BASE="pretrained=/project/peilab/jys/qwen3_5_output/vggt-omega,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt,disable_thinking=true" \
+OUTPUT_ROOT=logs/eval/spatialstack_qwen35_4b \
 BENCHMARKS="vsibench, cvbench" \
 bash scripts/evaluation/eval.sh
 ```
