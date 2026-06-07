@@ -195,7 +195,7 @@ Experimental Phase2 `vggt_omega_alpha`:
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
 GEOMETRY_ENCODER_TYPE=vggt_omega_alpha \
-GEOMETRY_ENCODER_PATH=/path/to/vggt_omega_1b_512.pt \
+GEOMETRY_ENCODER_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt \
 DATA_FLATTEN=False \
 OUTPUT_DIR=./output/qwen35_vggt_omega_alpha \
 bash scripts/train/train.sh
