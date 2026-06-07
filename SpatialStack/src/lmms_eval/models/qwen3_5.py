@@ -157,9 +157,17 @@ class Qwen3_5(lmms):
 
         geometry_encoder_path = geometry_encoder_path or getattr(config, "geometry_encoder_path", None)
         if use_geometry_model:
-            from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
+            geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
+            if geometry_encoder_type == "vggt_omega_alpha":
+                from qwen_vl.model.modeling_qwen3_5_vggt_omega_alpha import (
+                    Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha,
+                )
 
-            load_class = Qwen3_5ForConditionalGenerationWithGeometry
+                load_class = Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha
+            else:
+                from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
+
+                load_class = Qwen3_5ForConditionalGenerationWithGeometry
         else:
             load_class = Qwen3_5ForConditionalGeneration
 

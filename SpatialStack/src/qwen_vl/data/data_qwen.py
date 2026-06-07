@@ -50,6 +50,13 @@ QWEN3_5_NON_THINKING_CHAT_TEMPLATE = (
 local_rank = None
 
 
+def _estimated_qwen3_5_visual_tokens_per_image(geometry_encoder_type: str = "vggt") -> int:
+    base_tokens = 252
+    if geometry_encoder_type == "vggt_omega_alpha":
+        return base_tokens + 17
+    return base_tokens
+
+
 def rank0_print(*args):
     if local_rank == 0:
         print(*args)
@@ -259,6 +266,9 @@ class LazySupervisedDataset(Dataset):
     @property
     def lengths(self):
         length_list = []
+        per_image_visual_tokens = _estimated_qwen3_5_visual_tokens_per_image(
+            getattr(self.data_args, "geometry_encoder_type", "vggt")
+        )
         for sample in self.list_data_dict:
             cur_len = sum(
                 len(conv["value"].split()) for conv in sample["conversations"]
@@ -271,12 +281,15 @@ class LazySupervisedDataset(Dataset):
                 image_num = getattr(self.data_args, "video_max_frames", 8)
             else:
                 image_num = 0
-            length_list.append(image_num * 252 + cur_len)
+            length_list.append(image_num * per_image_visual_tokens + cur_len)
         return length_list
 
     @property
     def modality_lengths(self):
         length_list = []
+        per_image_visual_tokens = _estimated_qwen3_5_visual_tokens_per_image(
+            getattr(self.data_args, "geometry_encoder_type", "vggt")
+        )
         for sample in self.list_data_dict:
             cur_len = sum(
                 len(conv["value"].split()) for conv in sample["conversations"]
@@ -289,7 +302,7 @@ class LazySupervisedDataset(Dataset):
                 image_num = getattr(self.data_args, "video_max_frames", 8)
             else:
                 image_num = 0
-            cur_len += image_num * 252
+            cur_len += image_num * per_image_visual_tokens
             tag = sample.get("tag", "2d")
             cur_len = -cur_len if tag == "2d" else cur_len
             length_list.append(cur_len)

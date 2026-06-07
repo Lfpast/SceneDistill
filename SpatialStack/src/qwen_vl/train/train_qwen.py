@@ -236,7 +236,16 @@ def train(attn_implementation="flash_attention_2"):
         from transformers import Qwen3_5ForConditionalGeneration
 
         if model_args.use_geometry_encoder:
-            from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
+            if model_args.geometry_encoder_type == "vggt_omega_alpha":
+                from qwen_vl.model.modeling_qwen3_5_vggt_omega_alpha import (
+                    Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha,
+                )
+
+                qwen35_cls = Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha
+            else:
+                from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
+
+                qwen35_cls = Qwen3_5ForConditionalGenerationWithGeometry
 
             for k in [
                 "use_geometry_encoder",
@@ -257,7 +266,7 @@ def train(attn_implementation="flash_attention_2"):
             assert model_args.geometry_encoder_path is not None, (
                 "geometry_encoder_path must be set in the config when use_geometry_encoder is True."
             )
-            model = Qwen3_5ForConditionalGenerationWithGeometry.from_pretrained(
+            model = qwen35_cls.from_pretrained(
                 pretrained_model_name_or_path=model_args.model_name_or_path,
                 config=config,
                 cache_dir=training_args.cache_dir,

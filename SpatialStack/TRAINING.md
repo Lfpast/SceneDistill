@@ -181,6 +181,26 @@ directory containing `vggt_omega_1b_512.pt`, or the gated Hugging Face repo id
 `facebook/VGGT-Omega`. The current integration freezes Omega and reuses only its
 patch-token features; scene/register/text-alignment outputs remain unused.
 
+Experimental Phase2 `vggt_omega_alpha`:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega_alpha \
+GEOMETRY_ENCODER_PATH=/path/to/vggt_omega_1b_512.pt \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/qwen35_vggt_omega_alpha \
+bash scripts/train/train.sh
+```
+
+Phase2 alpha notes:
+
+- This is a separate architecture path from the Phase1 `vggt` / `vggt_omega` fusion branches.
+- Qwen keeps its normal visual processor path; the Omega-side geometry input is resized from `image_grid_thw`, so merged token counts stay aligned without hardcoding `196` or `224x224`.
+- Each frame prepends `1 camera + 16 scene/register` tokens to the Qwen visual span before the language model.
+- The inserted special tokens use a single `frame_center` MRoPE expansion rule in this branch.
+- Evaluation and inference must keep using the multi-image path for videos; do not switch this branch to Qwen's native video-token path.
+
 Qwen3.5 notes:
 
 - Keep `USE_GEOMETRY_ENCODER=True`; this is required for SpatialStack geometry

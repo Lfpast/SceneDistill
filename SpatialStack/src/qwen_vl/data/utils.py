@@ -14,6 +14,7 @@ import copy
 GEOMETRY_ENCODER_PATCH_SIZES = {
     "vggt": 14,
     "vggt_omega": 16,
+    "vggt_omega_alpha": 16,
 }
 
 
@@ -202,6 +203,9 @@ def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type:
         rgb_image = _load_rgb_image(image)
         geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
         _, grid_h, grid_w = [int(v) for v in grid.tolist()]
+        # `image_grid_thw` stores the pre-merger Qwen patch grid. For Omega
+        # paths (patch size 16), this naturally yields the 32*H / 32*W geometry
+        # resolution required to keep the merged token count aligned with Qwen.
         target_height = grid_h * geometry_patch_size
         target_width = grid_w * geometry_patch_size
         resized = rgb_image.resize((target_width, target_height), Image.Resampling.BICUBIC)

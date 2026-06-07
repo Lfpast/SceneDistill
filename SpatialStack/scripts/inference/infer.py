@@ -151,7 +151,7 @@ def patch_qwen3_5_flash_attention():
     flash_attention_utils._spatialstack_qwen3_5_mrope_patch = True
 
 
-def resolve_model_class(model_family: str, use_geometry_model: bool):
+def resolve_model_class(model_family: str, use_geometry_model: bool, geometry_encoder_type: str = "vggt"):
     if model_family == "qwen2_5_vl":
         from transformers import Qwen2_5_VLForConditionalGeneration
 
@@ -181,6 +181,12 @@ def resolve_model_class(model_family: str, use_geometry_model: bool):
                 f"Please install transformers>={MIN_QWEN3_5_TRANSFORMERS_VERSION}."
             ) from exc
         if use_geometry_model:
+            if geometry_encoder_type == "vggt_omega_alpha":
+                from qwen_vl.model.modeling_qwen3_5_vggt_omega_alpha import (
+                    Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha,
+                )
+
+                return Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha
             from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
 
             return Qwen3_5ForConditionalGenerationWithGeometry
@@ -262,7 +268,8 @@ def main():
     config = AutoConfig.from_pretrained(args.model_path)
     model_family = resolve_model_family(config)
     use_geometry_model = getattr(config, "use_geometry_encoder", False) or getattr(config, "use_vggt_feature", False)
-    model_class = resolve_model_class(model_family, use_geometry_model)
+    geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
+    model_class = resolve_model_class(model_family, use_geometry_model, geometry_encoder_type)
     if model_family == "qwen3_5":
         patch_qwen3_5_flash_attention()
 
@@ -311,7 +318,6 @@ def main():
         )
         geometry_encoder_inputs = None
         if use_geometry_model:
-            geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
             geometry_encoder_inputs = [
                 torch.stack(
                     build_qwen3_5_geometry_inputs(
