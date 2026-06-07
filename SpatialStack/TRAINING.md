@@ -181,6 +181,14 @@ directory containing `vggt_omega_1b_512.pt`, or the gated Hugging Face repo id
 `facebook/VGGT-Omega`. The current integration freezes Omega and reuses only its
 patch-token features; scene/register/text-alignment outputs remain unused.
 
+Phase1 Qwen3.5 geometry-input sizing notes:
+
+- Phase1 `vggt` and `vggt_omega` now follow the same grid-derived encoder-input sizing rule used by Phase2.
+- The source of truth is still Qwen's pre-merger `image_grid_thw`.
+- For `vggt`, the geometry-side input resolves to `14 * grid_h` by `14 * grid_w`, which is equivalent to `28*H` by `28*W` at the merged-token level.
+- For `vggt_omega`, the geometry-side input resolves to `16 * grid_h` by `16 * grid_w`, which is equivalent to `32*H` by `32*W`.
+- Only the geometry encoder input size is aligned across Phase1 and Phase2; Phase1 fusion logic and token flow remain unchanged.
+
 Experimental Phase2 `vggt_omega_alpha`:
 
 ```bash

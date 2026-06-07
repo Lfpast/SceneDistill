@@ -212,6 +212,15 @@ The released `Journey9ni/SpatialStack-Qwen3.5-4B` checkpoint is geometry-enabled
 it uses VGGT-1B with geometry layers `[11, 17, 23]` fused into language layers
 `[0, 1, 2]`.
 
+For Qwen3.5 geometry runs, the geometry encoder input size is derived from
+Qwen's pre-merger `image_grid_thw` in both Phase1 and Phase2. Concretely:
+
+- `vggt`: geometry-side input uses `14 * grid_h` by `14 * grid_w`
+- `vggt_omega`: geometry-side input uses `16 * grid_h` by `16 * grid_w`
+
+This aligns Phase1 input sizing with the current Phase2 convention while
+leaving Phase1 fusion behavior unchanged.
+
 Train SpatialStack from the `Qwen/Qwen3.5-4B` base model with geometry enabled:
 
 ```bash

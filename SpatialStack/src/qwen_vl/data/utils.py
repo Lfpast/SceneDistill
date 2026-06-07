@@ -27,6 +27,12 @@ def _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size: int) -> tuple[int, int
     return t, h // spatial_merge_size, w // spatial_merge_size
 
 
+def get_qwen3_5_geometry_input_hw(grid_thw, geometry_encoder_type: str = "vggt") -> tuple[int, int]:
+    geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
+    _, grid_h, grid_w = [int(v) for v in grid_thw.tolist()]
+    return grid_h * geometry_patch_size, grid_w * geometry_patch_size
+
+
 def get_qwen3_5_visual_token_count(
     grid_thw,
     spatial_merge_size: int,
@@ -201,13 +207,15 @@ def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type:
 
     for image, grid in zip(images, image_grid_thw):
         rgb_image = _load_rgb_image(image)
-        geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
-        _, grid_h, grid_w = [int(v) for v in grid.tolist()]
-        # `image_grid_thw` stores the pre-merger Qwen patch grid. For Omega
-        # paths (patch size 16), this naturally yields the 32*H / 32*W geometry
-        # resolution required to keep the merged token count aligned with Qwen.
-        target_height = grid_h * geometry_patch_size
-        target_width = grid_w * geometry_patch_size
+        # Phase 1 (`vggt` / `vggt_omega`) and Phase 2 (`vggt_omega_alpha`) now
+        # share the same Qwen3.5 geometry-input sizing rule: derive the
+        # geometry-side resolution directly from the pre-merger Qwen patch grid.
+        # This keeps input-size as the controlled variable across branches while
+        # leaving the downstream fusion/injection logic unchanged.
+        target_height, target_width = get_qwen3_5_geometry_input_hw(
+            grid,
+            geometry_encoder_type=geometry_encoder_type,
+        )
         resized = rgb_image.resize((target_width, target_height), Image.Resampling.BICUBIC)
         tensor = TF.ToTensor()(resized)
         geometry_tensors.append(tensor)
