@@ -29,12 +29,16 @@ class VGGTOmegaAlphaProjector(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
+        self.norm = nn.LayerNorm(input_dim)
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.act = nn.GELU()
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.alpha_gate = nn.Parameter(torch.tensor(1e-2))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_dtype = x.dtype
         x = x.to(dtype=self.fc1.weight.dtype)
+        x = self.norm(x)
         x = self.fc2(self.act(self.fc1(x)))
+        x = self.alpha_gate.to(dtype=x.dtype, device=x.device) * x
         return x.to(dtype=input_dtype)

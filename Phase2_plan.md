@@ -120,11 +120,11 @@
 
 - 新建 [SpatialStack/src/qwen_vl/model/vggt_omega_alpha_projector.py](/home/jackson/python/SpatialStack-omega/SpatialStack/src/qwen_vl/model)
   - 职责：
-    - 渐进投影：`2048 -> midpoint_hidden -> text_hidden`
+    - 稳定化渐进投影：`LayerNorm(2048) -> 2048 -> midpoint_hidden -> text_hidden -> alpha_gate`
     - 其中 `midpoint_hidden` 必须同时不同于 `input_dim` 和 `output_dim`
-    - 结构保持简单，`Linear + GELU + Linear`
+    - `alpha_gate` 初始化为 `1e-2`，用于降低新增 alpha token 对 LLM 输入分布的初始扰动，同时保持 projector 可训练
   - 这会是 Phase2 唯一新增的 trainable alpha-side 模块。
-  - 不迁移 temp `CamSceneTokenProjector` 里的 LayerNorm / hidden_mult 设计，除非后续你明确要保留。
+  - 不迁移 temp `CamSceneTokenProjector` 里的 hidden_mult / distill 设计，除非后续你明确要保留。
 
 - 新建 [SpatialStack/src/qwen_vl/model/vggt_omega_alpha_packing.py](/home/jackson/python/SpatialStack-omega/SpatialStack/src/qwen_vl/model)
   - 这不是 temp `cam_distill.py` 的直接复制版，而是它的**瘦身重写版**。
