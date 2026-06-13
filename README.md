@@ -153,10 +153,9 @@ bash scripts/train/train.sh
 
 The evaluation result path can be modified inside `eval.sh` (`FORCE_OUTPUT_ROOT` & `FORCE_OUTPUT_PATH`)
 ```bash
-MODEL_PATH=YOUR_MODEL_PATJ \
+MODEL_PATH=/project/peilab/jys/qwen3_5_output/baseline \
 MODEL_IMPL=qwen3_5 \
-MODEL_ARGS_BASE="pretrained=YOUR_MODEL_PATH,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=PATH_TO_VGGT_OMEGA,disable_thinking=true" \
-OUTPUT_ROOT=logs/eval/spatialstack_qwen35_4b \
-BENCHMARKS="<benchmark1>, <benchmark2>, ..." \
+MODEL_ARGS_BASE="pretrained=/project/peilab/jys/qwen3_5_output/baseline,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt,disable_thinking=true" \
+BENCHMARKS="blink_spatial" \
 bash scripts/evaluation/eval.sh
 ```
