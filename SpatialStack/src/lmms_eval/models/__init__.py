@@ -45,6 +45,7 @@ AVAILABLE_MODELS = {
     "qwen2vl": "Qwen2VL",
     "qwen2_5_vl": "Qwen2_5_VL",
     "qwen3_5": "Qwen3_5",
+    "vgllm": "VGLLM",
     "cambrians": "CambrianS",
     "spatialstack": "SpatialStack",
     "spatialrgpt": "SpatialRGPT",
