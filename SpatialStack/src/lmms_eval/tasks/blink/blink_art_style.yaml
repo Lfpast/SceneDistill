@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/Art_Style"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: Art_Style
 tag: "blink_groups"
 task: "blink_art_style"
 include: _default_template_yaml

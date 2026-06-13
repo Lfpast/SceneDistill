@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/Counting"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: Counting
 tag: "blink_groups"
 task: "blink_counting"
 include: _default_template_yaml

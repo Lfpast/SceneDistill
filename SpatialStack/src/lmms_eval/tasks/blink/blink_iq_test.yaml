@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/IQ_Test"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: IQ_Test
 tag: "blink_groups"
 task: "blink_iq_test"
 include: _default_template_yaml

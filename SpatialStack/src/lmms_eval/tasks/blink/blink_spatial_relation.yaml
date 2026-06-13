@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/Spatial_Relation"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: Spatial_Relation
 tag: "blink_groups"
 task: "blink_spatial_relation"
 include: _default_template_yaml

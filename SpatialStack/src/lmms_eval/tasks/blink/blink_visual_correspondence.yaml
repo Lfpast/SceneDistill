@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/Visual_Correspondence"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: Visual_Correspondence
 tag: "blink_groups"
 task: "blink_visual_correspondence"
 include: _default_template_yaml

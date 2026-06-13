@@ -1,6 +1,5 @@
-dataset_path: "cache/datasets/BLINK-Benchmark__BLINK/Relative_Reflectance"
-dataset_kwargs:
-  load_from_disk: true
+dataset_path: BLINK-Benchmark/BLINK
+dataset_name: Relative_Reflectance
 tag: "blink_groups"
 task: "blink_relative_reflectance"
 include: _default_template_yaml
