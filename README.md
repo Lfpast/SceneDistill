@@ -153,9 +153,9 @@ bash scripts/train/train.sh
 
 The evaluation result path can be modified inside `eval.sh` (`FORCE_OUTPUT_ROOT` & `FORCE_OUTPUT_PATH`)
 ```bash
-MODEL_PATH=/project/peilab/jys/qwen3_5_output/baseline \
-MODEL_IMPL=qwen3_5 \
-MODEL_ARGS_BASE="pretrained=/project/peilab/jys/qwen3_5_output/baseline,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt,disable_thinking=true" \
-BENCHMARKS="blink_spatial" \
+MODEL_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--nyu-visionx--Cambrian-S-3B/snapshots/9d8cbd75ab3ed53683b171d6fdd888f81f0febd1 \
+MODEL_IMPL=cambrians \
+MODEL_ARGS_BASE="pretrained=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--nyu-visionx--Cambrian-S-3B/snapshots/9d8cbd75ab3ed53683b171d6fdd888f81f0febd1,max_num_frames=32,max_length=12800,disable_thinking=true" \
+BENCHMARKS="cvbench" \
 bash scripts/evaluation/eval.sh
 ```
