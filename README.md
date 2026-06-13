@@ -159,3 +159,11 @@ MODEL_ARGS_BASE="pretrained=/project/peilab/jys/spatialstack_store/hf_cache/hub/
 BENCHMARKS="cvbench" \
 bash scripts/evaluation/eval.sh
 ```
+
+```bash
+MODEL_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--rooty2020--VG-LLM-Qwen3-VL-4B/snapshots/5b9447b0aa1fbe7daf691ce92d8993ad6b7d5036 \
+MODEL_IMPL=vgllm \
+MODEL_ARGS_BASE="pretrained=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--rooty2020--VG-LLM-Qwen3-VL-4B/snapshots/5b9447b0aa1fbe7daf691ce92d8993ad6b7d5036,use_flash_attention_2=true,max_num_frames=32,max_length=12800" \
+BENCHMARKS="vsibench, cvbench, blink_spatial, sparbench, videomme, mmsibench" \
+bash scripts/evaluation/eval.sh
+```
