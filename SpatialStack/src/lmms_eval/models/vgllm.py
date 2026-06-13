@@ -1,5 +1,6 @@
 import base64
 import copy
+import inspect
 import os
 from io import BytesIO
 from pathlib import Path
@@ -70,23 +71,42 @@ def _encode_image_to_data_uri(image: Image.Image) -> str:
     return f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}"
 
 
-def _load_model_class(pretrained: str, architecture_name: Optional[str]):
+def _load_model_class(pretrained: str, config) -> tuple[type, bool]:
+    auto_map = getattr(config, "auto_map", None) or {}
+    if get_class_from_dynamic_module and auto_map:
+        for auto_name in ("AutoModelForImageTextToText", "AutoModelForVision2Seq", "AutoModelForCausalLM"):
+            class_ref = auto_map.get(auto_name)
+            if class_ref:
+                return get_class_from_dynamic_module(class_ref, pretrained), True
+
+    architecture_name = None
+    if getattr(config, "architectures", None):
+        architecture_name = config.architectures[0]
+
     if architecture_name and get_class_from_dynamic_module and os.path.isdir(pretrained):
-        for candidate in sorted(Path(pretrained).glob("modeling*.py")):
-            class_ref = f"{candidate.stem}.{architecture_name}"
+        for candidate in sorted(Path(pretrained).rglob("*.py")):
+            rel_module = ".".join(candidate.relative_to(pretrained).with_suffix("").parts)
+            class_ref = f"{rel_module}.{architecture_name}"
             try:
-                return get_class_from_dynamic_module(class_ref, pretrained)
+                return get_class_from_dynamic_module(class_ref, pretrained), True
             except Exception:
                 continue
 
     for auto_cls in (AutoModelForImageTextToText, AutoModelForVision2Seq, AutoModelForCausalLM):
         if auto_cls is not None:
-            return auto_cls
+            return auto_cls, False
 
     raise RuntimeError(
         "Could not find a compatible Transformers auto model class for VG-LLM. "
         "Please install a Transformers build with Qwen3-VL support."
     )
+
+
+def _supports_geometry_encoder_inputs(model) -> bool:
+    try:
+        return "geometry_encoder_inputs" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 @register_model("vgllm")
@@ -104,6 +124,7 @@ class VGLLM(lmms):
         max_num_frames: int = 32,
         max_length: Optional[int] = None,
         add_frame_index: bool = False,
+        geometry_encoder_path: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -124,16 +145,18 @@ class VGLLM(lmms):
             self.device_map = f"cuda:{accelerator.local_process_index}"
 
         self._config = AutoConfig.from_pretrained(pretrained, trust_remote_code=True)
-        architecture_name = None
-        if getattr(self._config, "architectures", None):
-            architecture_name = self._config.architectures[0]
+        if geometry_encoder_path is not None:
+            setattr(self._config, "geometry_encoder_path", geometry_encoder_path)
 
-        load_class = _load_model_class(pretrained, architecture_name)
+        load_class, used_custom_code = _load_model_class(pretrained, self._config)
         load_kwargs = {
-            "config": self._config,
             "device_map": self.device_map,
             "trust_remote_code": True,
         }
+        if used_custom_code:
+            load_kwargs["config"] = self._config
+            if geometry_encoder_path is not None and "geometry_encoder_path" in inspect.signature(load_class.from_pretrained).parameters:
+                load_kwargs["geometry_encoder_path"] = geometry_encoder_path
         if use_flash_attention_2:
             load_kwargs["torch_dtype"] = torch.bfloat16
             load_kwargs["attn_implementation"] = "flash_attention_2"
@@ -157,6 +180,19 @@ class VGLLM(lmms):
 
         self.batch_size_per_gpu = int(batch_size)
         self.use_cache = use_cache
+        self._supports_geometry_inputs = _supports_geometry_encoder_inputs(self.model)
+        self._expects_geometry_inputs = bool(
+            getattr(self.model.config, "use_geometry_encoder", False)
+            or getattr(self.model.config, "use_vggt_feature", False)
+        )
+        if self._expects_geometry_inputs and not self._supports_geometry_inputs:
+            raise RuntimeError(
+                "This VG-LLM checkpoint expects geometry features, but the loaded model class does not accept "
+                "`geometry_encoder_inputs`. This usually means the checkpoint was loaded with the built-in "
+                "Transformers Qwen3-VL class instead of the VG-LLM custom class. "
+                "Per the official VG-LLM eval script, you should not need to pass an extra VGGT path for eval; "
+                "the missing piece is loading the checkpoint's custom Python model code."
+            )
 
         if accelerator.num_processes > 1:
             assert accelerator.distributed_type in [
@@ -294,10 +330,7 @@ class VGLLM(lmms):
             )
 
             device = "cuda" if self.device_map == "auto" else self.device
-            if geometry_encoder_inputs and (
-                getattr(self.model.config, "use_geometry_encoder", False)
-                or getattr(self.model.config, "use_vggt_feature", False)
-            ):
+            if geometry_encoder_inputs and self._supports_geometry_inputs:
                 inputs["geometry_encoder_inputs"] = [feat.to(device) for feat in geometry_encoder_inputs]
             inputs = inputs.to(device)
 
