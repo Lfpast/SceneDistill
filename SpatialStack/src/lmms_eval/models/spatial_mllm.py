@@ -129,6 +129,10 @@ def _import_spatial_mllm_modules(spatial_mllm_repo_path: Optional[str]):
     repo_path_str = str(repo_path)
     if repo_path_str not in sys.path:
         sys.path.insert(0, repo_path_str)
+    external_root = repo_path / "src" / "qwenvl" / "external"
+    external_root_str = str(external_root)
+    if external_root.is_dir() and external_root_str not in sys.path:
+        sys.path.insert(0, external_root_str)
 
     spatial_mllm_module = importlib.import_module("src.qwenvl.model.spatial_mllm")
     return spatial_mllm_module.SpatialMLLMConfig, spatial_mllm_module.SpatialMLLMForConditionalGeneration
