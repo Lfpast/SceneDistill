@@ -63,27 +63,6 @@ def _normalize_sample_visual(raw_visual):
     raise NotImplementedError(f"Unsupported visual type: {type(raw_visual)}")
 
 
-def _convert_image_list_to_tchw(image_inputs):
-    tensors = []
-    for image_input in image_inputs:
-        if not isinstance(image_input, Image.Image):
-            raise ValueError(f"Unsupported image input format: {type(image_input)}")
-        tensors.append(torch.tensor(np.array(image_input)).permute(2, 0, 1).float() / 255.0)
-    return torch.stack(tensors, dim=0)
-
-
-def _convert_video_input_to_tchw(video_input):
-    if isinstance(video_input, torch.Tensor):
-        if video_input.ndim == 4:
-            if video_input.shape[-1] in (1, 3):
-                video_input = video_input.permute(0, 3, 1, 2)
-            return video_input.float() / 255.0
-        raise ValueError(f"Unsupported video tensor shape: {tuple(video_input.shape)}")
-    if isinstance(video_input, list) and all(isinstance(img, Image.Image) for img in video_input):
-        return torch.stack([torch.tensor(np.array(img)).permute(2, 0, 1) for img in video_input]).float() / 255.0
-    raise ValueError(f"Unsupported video input format: {type(video_input)}")
-
-
 def _build_sample_tchw_from_processed(processed_visuals, grid_thw, temporal_patch_size: int):
     sample_tensors = []
     frame_cursor = 0
@@ -123,7 +102,13 @@ def _normalize_grid_rows(grid_thw) -> List:
     raise ValueError(f"Unsupported grid_thw format: {type(grid_thw)}")
 
 
-def _split_processed_visuals_by_sample(processed_visuals, grid_thw, visual_counts, temporal_patch_size: int):
+def _split_processed_visuals_by_sample(
+    processed_visuals,
+    grid_thw,
+    visual_counts,
+    temporal_patch_size: int,
+    patch_size: int,
+):
     if processed_visuals is None:
         return []
 
@@ -140,13 +125,20 @@ def _split_processed_visuals_by_sample(processed_visuals, grid_thw, visual_count
                 f"Mismatch between sample visual count ({visual_count}) and grid rows ({len(sample_grid_rows)})."
             )
 
-        sample_tensors.append(
-            _build_sample_tchw_from_processed(
-                processed_visuals[frame_cursor:total_frames],
-                sample_grid_rows,
-                temporal_patch_size,
-            )
+        sample_tensor = _build_sample_tchw_from_processed(
+            processed_visuals[frame_cursor:total_frames],
+            sample_grid_rows,
+            temporal_patch_size,
         )
+        expected_h = int(sample_grid_rows[0][1]) * patch_size
+        expected_w = int(sample_grid_rows[0][2]) * patch_size
+        actual_h, actual_w = sample_tensor.shape[-2:]
+        if (actual_h, actual_w) != (expected_h, expected_w):
+            raise ValueError(
+                "Processed visual size and grid_thw are inconsistent: "
+                f"actual HxW={actual_h}x{actual_w}, expected HxW={expected_h}x{expected_w}."
+            )
+        sample_tensors.append(sample_tensor)
         frame_cursor += sum(int(grid[0]) * temporal_patch_size for grid in sample_grid_rows)
         grid_cursor += visual_count
 
@@ -156,6 +148,74 @@ def _split_processed_visuals_by_sample(processed_visuals, grid_thw, visual_count
         raise ValueError(f"Processed grid row mismatch: consumed {grid_cursor}, available {len(grid_rows)}.")
 
     return sample_tensors
+
+
+def _left_pad_tensors(tensors: List[torch.Tensor], pad_value: int) -> torch.Tensor:
+    max_length = max(tensor.numel() for tensor in tensors)
+    padded = tensors[0].new_full((len(tensors), max_length), pad_value)
+    for idx, tensor in enumerate(tensors):
+        padded[idx, -tensor.numel():] = tensor
+    return padded
+
+
+def _cat_present_tensors(sample_inputs: List[dict], key: str):
+    tensors = [sample_input[key] for sample_input in sample_inputs if sample_input.get(key) is not None]
+    if not tensors:
+        return None
+    return torch.cat(tensors, dim=0)
+
+
+def _merge_second_per_grid_ts(sample_inputs: List[dict]):
+    values = []
+    for sample_input in sample_inputs:
+        second_per_grid_ts = sample_input.get("second_per_grid_ts")
+        if second_per_grid_ts is None:
+            continue
+        if torch.is_tensor(second_per_grid_ts):
+            values.extend(second_per_grid_ts.tolist())
+        else:
+            values.extend(second_per_grid_ts)
+    return values or None
+
+
+def _collate_spatial_mllm_inputs(sample_inputs: List[dict], pad_token_id: int) -> dict:
+    input_ids = _left_pad_tensors(
+        [sample_input["input_ids"].view(-1) for sample_input in sample_inputs],
+        pad_token_id,
+    )
+    attention_mask = _left_pad_tensors(
+        [sample_input["attention_mask"].view(-1) for sample_input in sample_inputs],
+        0,
+    )
+
+    image_tchw = []
+    video_tchw = []
+    for sample_input in sample_inputs:
+        image_tchw.extend(sample_input.get("image_tchw") or [])
+        video_tchw.extend(sample_input.get("video_tchw") or [])
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "pixel_values": _cat_present_tensors(sample_inputs, "pixel_values"),
+        "image_grid_thw": _cat_present_tensors(sample_inputs, "image_grid_thw"),
+        "pixel_values_videos": _cat_present_tensors(sample_inputs, "pixel_values_videos"),
+        "video_grid_thw": _cat_present_tensors(sample_inputs, "video_grid_thw"),
+        "second_per_grid_ts": _merge_second_per_grid_ts(sample_inputs),
+        "image_tchw": image_tchw or None,
+        "video_tchw": video_tchw or None,
+    }
+
+
+def _move_inputs_to_device(inputs: dict, device) -> dict:
+    for key, value in list(inputs.items()):
+        if torch.is_tensor(value):
+            inputs[key] = value.to(device)
+    if inputs.get("image_tchw") is not None:
+        inputs["image_tchw"] = [image_tchw.to(device) for image_tchw in inputs["image_tchw"]]
+    if inputs.get("video_tchw") is not None:
+        inputs["video_tchw"] = [video_tchw.to(device) for video_tchw in inputs["video_tchw"]]
+    return inputs
 
 
 def _get_spatialstack_omega_root() -> Path:
@@ -197,7 +257,12 @@ def _import_spatial_mllm_modules(spatial_mllm_repo_path: Optional[str]):
         sys.path.insert(0, external_root_str)
 
     spatial_mllm_module = importlib.import_module("src.qwenvl.model.spatial_mllm")
-    return spatial_mllm_module.SpatialMLLMConfig, spatial_mllm_module.SpatialMLLMForConditionalGeneration
+    image_processor_module = importlib.import_module("src.qwenvl.preprocessor.image_processing_qwen2_vl")
+    return (
+        spatial_mllm_module.SpatialMLLMConfig,
+        spatial_mllm_module.SpatialMLLMForConditionalGeneration,
+        image_processor_module.Qwen2VLImageProcessorModified,
+    )
 
 
 @register_model("spatial_mllm")
@@ -220,7 +285,11 @@ class SpatialMLLM(lmms):
         super().__init__()
         assert kwargs == {}, f"Unexpected kwargs: {kwargs}"
 
-        SpatialMLLMConfig, SpatialMLLMForConditionalGeneration = _import_spatial_mllm_modules(spatial_mllm_repo_path)
+        (
+            SpatialMLLMConfig,
+            SpatialMLLMForConditionalGeneration,
+            Qwen2VLImageProcessorModified,
+        ) = _import_spatial_mllm_modules(spatial_mllm_repo_path)
         try:
             from transformers import Qwen2_5_VLProcessor
         except ImportError as exc:
@@ -253,6 +322,11 @@ class SpatialMLLM(lmms):
             min_pixels=min_pixels,
             padding_side="left",
         )
+        self.processor.image_processor = Qwen2VLImageProcessorModified.from_pretrained(
+            pretrained,
+            max_pixels=max_pixels,
+            min_pixels=min_pixels,
+        )
         self._tokenizer = AutoTokenizer.from_pretrained(pretrained, padding_side="left")
         if max_length is not None:
             setattr(self.processor.tokenizer, "model_max_length", max_length)
@@ -263,6 +337,13 @@ class SpatialMLLM(lmms):
         self.batch_size_per_gpu = int(batch_size)
         self._config = self.model.config
         self._max_length = getattr(self._tokenizer, "model_max_length", None)
+        self._spatial_patch_size = int(self.model.config.spatial_config.patch_size)
+        processor_patch_size = int(self.processor.image_processor.patch_size)
+        if processor_patch_size != self._spatial_patch_size:
+            raise ValueError(
+                "Spatial-MLLM processor and spatial encoder patch sizes differ: "
+                f"processor={processor_patch_size}, spatial_encoder={self._spatial_patch_size}."
+            )
 
         if accelerator.num_processes > 1:
             assert accelerator.distributed_type in [
@@ -365,82 +446,78 @@ class SpatialMLLM(lmms):
                 user_content.append({"type": "text", "text": context})
                 messages.append([{"role": "user", "content": user_content}])
 
-            text = [
-                self.processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
-                for message in messages
-            ]
-
-            image_inputs = []
-            video_inputs = []
-            image_sample_counts = []
-            video_sample_counts = []
-            for message in messages:
-                sample_image_inputs, sample_video_inputs = process_vision_info(message)
-                if sample_video_inputs:
-                    video_inputs.extend(sample_video_inputs)
-                    video_sample_counts.append(len(sample_video_inputs))
-                elif sample_image_inputs:
-                    image_inputs.extend(sample_image_inputs)
-                    image_sample_counts.append(len(sample_image_inputs))
-
-            inputs = self.processor(
-                text=text,
-                images=image_inputs if image_inputs else None,
-                videos=video_inputs if video_inputs else None,
-                return_tensors="pt",
-                padding=True,
-                padding_side="left",
-            )
+            sample_inputs = []
             temporal_patch_size = int(getattr(self.processor.image_processor, "temporal_patch_size", 1))
-            processed_images = inputs.pop("processed_images", None)
-            processed_videos = inputs.pop("processed_videos", None)
+            for message in messages:
+                sample_text = self.processor.apply_chat_template(
+                    message,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                sample_image_inputs, sample_video_inputs = process_vision_info(message)
 
-            image_tchw = []
-            video_tchw = []
-            if image_sample_counts:
-                if processed_images is not None:
+                sample_input = self.processor(
+                    text=[sample_text],
+                    images=sample_image_inputs if sample_image_inputs else None,
+                    videos=sample_video_inputs if sample_video_inputs else None,
+                    return_tensors="pt",
+                    padding=True,
+                    padding_side="left",
+                )
+                processed_images = sample_input.pop("processed_images", None)
+                processed_videos = sample_input.pop("processed_videos", None)
+
+                image_tchw = []
+                video_tchw = []
+                if sample_image_inputs:
+                    if processed_images is None:
+                        raise RuntimeError(
+                            "Spatial-MLLM processor did not return `processed_images`; "
+                            "the adapter requires Qwen2VLImageProcessorModified for spatial encoder alignment."
+                        )
                     image_tchw = _split_processed_visuals_by_sample(
                         processed_images,
-                        inputs.get("image_grid_thw"),
-                        image_sample_counts,
+                        sample_input.get("image_grid_thw"),
+                        [len(sample_image_inputs)],
                         temporal_patch_size,
+                        self._spatial_patch_size,
                     )
-                else:
-                    image_offset = 0
-                    for image_count in image_sample_counts:
-                        sample_image_inputs = image_inputs[image_offset : image_offset + image_count]
-                        image_tchw.append(_convert_image_list_to_tchw(sample_image_inputs))
-                        image_offset += image_count
 
-            if video_sample_counts:
-                if processed_videos is not None:
+                if sample_video_inputs:
+                    if processed_videos is None:
+                        raise RuntimeError(
+                            "Spatial-MLLM processor did not return `processed_videos`; "
+                            "the adapter requires Qwen2VLImageProcessorModified for spatial encoder alignment."
+                        )
                     video_tchw = _split_processed_visuals_by_sample(
                         processed_videos,
-                        inputs.get("video_grid_thw"),
-                        video_sample_counts,
+                        sample_input.get("video_grid_thw"),
+                        [len(sample_video_inputs)],
                         temporal_patch_size,
+                        self._spatial_patch_size,
                     )
-                else:
-                    video_offset = 0
-                    for video_count in video_sample_counts:
-                        sample_video_inputs = video_inputs[video_offset : video_offset + video_count]
-                        sample_video_tensors = [_convert_video_input_to_tchw(video_input) for video_input in sample_video_inputs]
-                        video_tchw.append(torch.cat(sample_video_tensors, dim=0))
-                        video_offset += video_count
 
-            inputs.update(
-                {
-                    "image_tchw": image_tchw if image_tchw else None,
-                    "video_tchw": video_tchw if video_tchw else None,
-                }
-            )
+                sample_input.update(
+                    {
+                        "image_tchw": image_tchw if image_tchw else None,
+                        "video_tchw": video_tchw if video_tchw else None,
+                    }
+                )
+                sample_inputs.append(sample_input)
+
+            pad_token_id = self.tokenizer.pad_token_id
+            if pad_token_id is None:
+                pad_token_id = self.tokenizer.eos_token_id
+            inputs = _collate_spatial_mllm_inputs(sample_inputs, pad_token_id)
+            inputs = {key: value for key, value in inputs.items() if value is not None}
+
+            if inputs.get("pixel_values") is not None and inputs.get("image_tchw") is None:
+                raise RuntimeError("`image_tchw` must be provided when `pixel_values` is present.")
+            if inputs.get("pixel_values_videos") is not None and inputs.get("video_tchw") is None:
+                raise RuntimeError("`video_tchw` must be provided when `pixel_values_videos` is present.")
 
             device = "cuda" if self.device_map == "auto" else self.device
-            inputs = inputs.to(device)
-            if inputs.get("image_tchw") is not None:
-                inputs["image_tchw"] = [image_tchw.to(device) for image_tchw in inputs["image_tchw"]]
-            if inputs.get("video_tchw") is not None:
-                inputs["video_tchw"] = [video_tchw.to(device) for video_tchw in inputs["video_tchw"]]
+            inputs = _move_inputs_to_device(inputs, device)
 
             if "max_new_tokens" not in gen_kwargs:
                 gen_kwargs["max_new_tokens"] = 1024
@@ -454,7 +531,7 @@ class SpatialMLLM(lmms):
             output_ids = self.model.generate(
                 **inputs,
                 eos_token_id=self.tokenizer.eos_token_id,
-                pad_token_id=self.tokenizer.pad_token_id,
+                pad_token_id=pad_token_id,
                 do_sample=True if gen_kwargs["temperature"] > 0 else False,
                 temperature=gen_kwargs["temperature"],
                 top_p=gen_kwargs["top_p"],
@@ -463,7 +540,9 @@ class SpatialMLLM(lmms):
                 use_cache=self.use_cache,
             )
 
-            generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], output_ids)]
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], output_ids)
+            ]
             answers = self.processor.batch_decode(
                 generated_ids_trimmed,
                 skip_special_tokens=True,
