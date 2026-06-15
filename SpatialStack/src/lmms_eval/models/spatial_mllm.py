@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
@@ -24,7 +25,7 @@ except ImportError:
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-DEFAULT_SPATIAL_MLLM_REPO_PATH = "/home/jackson/python/Spatial-MLLM"
+SPATIAL_MLLM_REPO_NAME = "Spatial-MLLM"
 
 
 def _is_video_path(path: str) -> bool:
@@ -95,16 +96,39 @@ def _prepare_spatial_mllm_inputs(batch, video_inputs, image_inputs):
     return batch
 
 
-def _import_spatial_mllm_modules(spatial_mllm_repo_path: str):
-    repo_path = os.path.abspath(os.path.expanduser(spatial_mllm_repo_path))
+def _get_spatialstack_omega_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _get_default_spatial_mllm_repo_path() -> Path:
+    return _get_spatialstack_omega_root().parent / SPATIAL_MLLM_REPO_NAME
+
+
+def _resolve_spatial_mllm_repo_path(spatial_mllm_repo_path: Optional[str]) -> Path:
+    if spatial_mllm_repo_path in (None, "", "auto"):
+        return _get_default_spatial_mllm_repo_path()
+
+    candidate = Path(os.path.expanduser(spatial_mllm_repo_path))
+    if candidate.is_absolute():
+        return candidate
+
+    # Interpret relative paths against the SpatialStack-omega parent directory,
+    # so `Spatial-MLLM` resolves to a sibling checkout on local and remote hosts.
+    return _get_spatialstack_omega_root().parent / candidate
+
+
+def _import_spatial_mllm_modules(spatial_mllm_repo_path: Optional[str]):
+    repo_path = _resolve_spatial_mllm_repo_path(spatial_mllm_repo_path)
     if not os.path.isdir(repo_path):
         raise FileNotFoundError(
             f"Spatial-MLLM repo path does not exist: {repo_path}. "
-            "Set `spatial_mllm_repo_path=...` in MODEL_ARGS_BASE/MODEL_ARGS_EXTRA."
+            f"Expected the default sibling checkout at {_get_default_spatial_mllm_repo_path()}. "
+            "Override with `spatial_mllm_repo_path=...` in MODEL_ARGS_BASE/MODEL_ARGS_EXTRA if needed."
         )
 
-    if repo_path not in sys.path:
-        sys.path.insert(0, repo_path)
+    repo_path_str = str(repo_path)
+    if repo_path_str not in sys.path:
+        sys.path.insert(0, repo_path_str)
 
     spatial_mllm_module = importlib.import_module("src.qwenvl.model.spatial_mllm")
     return spatial_mllm_module.SpatialMLLMConfig, spatial_mllm_module.SpatialMLLMForConditionalGeneration
@@ -115,7 +139,7 @@ class SpatialMLLM(lmms):
     def __init__(
         self,
         pretrained: str = "Diankun/Spatial-MLLM-v1.1-Instruct-135K",
-        spatial_mllm_repo_path: str = DEFAULT_SPATIAL_MLLM_REPO_PATH,
+        spatial_mllm_repo_path: Optional[str] = None,
         device: Optional[str] = "cuda",
         device_map: Optional[str] = "auto",
         batch_size: Optional[Union[int, str]] = 1,
