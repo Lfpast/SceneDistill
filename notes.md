@@ -34,3 +34,5 @@ export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-pack
 export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 ```
 补充datasets, deepspeed, opencv-python-headless lib
+
+/home/jackson/python/SpatialStack-omega/Phase2_plan.md
