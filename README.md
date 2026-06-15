@@ -162,7 +162,7 @@ bash scripts/evaluation/eval.sh
 
 ```bash
 MODEL_PATH=Diankun/Spatial-MLLM-v1.1-Instruct-135K \
-MODEL_IMPL=vgllm \
+MODEL_IMPL=spatial_mllm \
 MODEL_ARGS_BASE="pretrained=Diankun/Spatial-MLLM-v1.1-Instruct-135K,use_flash_attention_2=true,max_num_frames=32,max_length=12800" \
 BENCHMARKS="vsibench" \
 bash scripts/evaluation/eval.sh
