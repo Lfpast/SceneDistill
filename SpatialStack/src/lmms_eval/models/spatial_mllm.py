@@ -63,37 +63,25 @@ def _normalize_sample_visual(raw_visual):
     raise NotImplementedError(f"Unsupported visual type: {type(raw_visual)}")
 
 
-def _prepare_spatial_mllm_inputs(batch, video_inputs, image_inputs):
-    video_tchw = []
-    image_tchw = []
+def _convert_image_list_to_tchw(image_inputs):
+    tensors = []
+    for image_input in image_inputs:
+        if not isinstance(image_input, Image.Image):
+            raise ValueError(f"Unsupported image input format: {type(image_input)}")
+        tensors.append(torch.tensor(np.array(image_input)).permute(2, 0, 1).float() / 255.0)
+    return torch.stack(tensors, dim=0)
 
-    if video_inputs:
-        for video_input in video_inputs:
-            if isinstance(video_input, torch.Tensor):
-                video_input = video_input.float() / 255.0
-            elif isinstance(video_input, list) and all(isinstance(img, Image.Image) for img in video_input):
-                video_input = torch.stack(
-                    [torch.tensor(np.array(img)).permute(2, 0, 1) for img in video_input]
-                ).float() / 255.0
-            else:
-                raise ValueError(f"Unsupported video input format: {type(video_input)}")
-            video_tchw.append(video_input)
 
-    if image_inputs:
-        for image_input in image_inputs:
-            if isinstance(image_input, Image.Image):
-                image_input = torch.tensor(np.array(image_input)).permute(2, 0, 1).float() / 255.0
-            else:
-                raise ValueError(f"Unsupported image input format: {type(image_input)}")
-            image_tchw.append(image_input)
-
-    batch.update(
-        {
-            "video_tchw": video_tchw if video_tchw else None,
-            "image_tchw": image_tchw if image_tchw else None,
-        }
-    )
-    return batch
+def _convert_video_input_to_tchw(video_input):
+    if isinstance(video_input, torch.Tensor):
+        if video_input.ndim == 4:
+            if video_input.shape[-1] in (1, 3):
+                video_input = video_input.permute(0, 3, 1, 2)
+            return video_input.float() / 255.0
+        raise ValueError(f"Unsupported video tensor shape: {tuple(video_input.shape)}")
+    if isinstance(video_input, list) and all(isinstance(img, Image.Image) for img in video_input):
+        return torch.stack([torch.tensor(np.array(img)).permute(2, 0, 1) for img in video_input]).float() / 255.0
+    raise ValueError(f"Unsupported video input format: {type(video_input)}")
 
 
 def _get_spatialstack_omega_root() -> Path:
@@ -307,7 +295,21 @@ class SpatialMLLM(lmms):
                 self.processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
                 for message in messages
             ]
-            image_inputs, video_inputs = process_vision_info(messages)
+
+            image_inputs = []
+            video_inputs = []
+            image_tchw = []
+            video_tchw = []
+            for message in messages:
+                sample_image_inputs, sample_video_inputs = process_vision_info(message)
+                if sample_video_inputs:
+                    video_inputs.extend(sample_video_inputs)
+                    for sample_video_input in sample_video_inputs:
+                        video_tchw.append(_convert_video_input_to_tchw(sample_video_input))
+                elif sample_image_inputs:
+                    image_inputs.extend(sample_image_inputs)
+                    image_tchw.append(_convert_image_list_to_tchw(sample_image_inputs))
+
             inputs = self.processor(
                 text=text,
                 images=image_inputs if image_inputs else None,
@@ -316,7 +318,12 @@ class SpatialMLLM(lmms):
                 padding=True,
                 padding_side="left",
             )
-            inputs = _prepare_spatial_mllm_inputs(inputs, video_inputs, image_inputs)
+            inputs.update(
+                {
+                    "image_tchw": image_tchw if image_tchw else None,
+                    "video_tchw": video_tchw if video_tchw else None,
+                }
+            )
 
             device = "cuda" if self.device_map == "auto" else self.device
             inputs = inputs.to(device)
