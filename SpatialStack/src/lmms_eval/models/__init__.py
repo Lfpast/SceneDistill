@@ -48,6 +48,7 @@ AVAILABLE_MODELS = {
     "vgllm": "VGLLM",
     "cambrians": "CambrianS",
     "spatialstack": "SpatialStack",
+    "spatial_mllm": "SpatialMLLM",
     "spatialrgpt": "SpatialRGPT",
     "spatialbot": "SpatialBot",
 }
