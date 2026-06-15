@@ -84,6 +84,80 @@ def _convert_video_input_to_tchw(video_input):
     raise ValueError(f"Unsupported video input format: {type(video_input)}")
 
 
+def _build_sample_tchw_from_processed(processed_visuals, grid_thw, temporal_patch_size: int):
+    sample_tensors = []
+    frame_cursor = 0
+    for grid in grid_thw:
+        frame_count = int(grid[0]) * temporal_patch_size
+        sample_tensors.append(processed_visuals[frame_cursor : frame_cursor + frame_count])
+        frame_cursor += frame_count
+    return torch.cat(sample_tensors, dim=0)
+
+
+def _normalize_grid_rows(grid_thw) -> List:
+    if grid_thw is None:
+        return []
+
+    if isinstance(grid_thw, torch.Tensor):
+        if grid_thw.ndim == 1:
+            return [grid_thw]
+        if grid_thw.ndim == 2:
+            return [grid_thw[i] for i in range(grid_thw.shape[0])]
+        raise ValueError(f"Unsupported grid_thw tensor shape: {tuple(grid_thw.shape)}")
+
+    if isinstance(grid_thw, np.ndarray):
+        if grid_thw.ndim == 1:
+            return [grid_thw]
+        if grid_thw.ndim == 2:
+            return [grid_thw[i] for i in range(grid_thw.shape[0])]
+        raise ValueError(f"Unsupported grid_thw array shape: {grid_thw.shape}")
+
+    if isinstance(grid_thw, (list, tuple)):
+        if len(grid_thw) == 0:
+            return []
+        first = grid_thw[0]
+        if isinstance(first, (int, np.integer)) or (torch.is_tensor(first) and first.ndim == 0):
+            return [grid_thw]
+        return list(grid_thw)
+
+    raise ValueError(f"Unsupported grid_thw format: {type(grid_thw)}")
+
+
+def _split_processed_visuals_by_sample(processed_visuals, grid_thw, visual_counts, temporal_patch_size: int):
+    if processed_visuals is None:
+        return []
+
+    grid_rows = _normalize_grid_rows(grid_thw)
+    sample_tensors = []
+    frame_cursor = 0
+    grid_cursor = 0
+    total_frames = processed_visuals.shape[0]
+
+    for visual_count in visual_counts:
+        sample_grid_rows = grid_rows[grid_cursor : grid_cursor + visual_count]
+        if len(sample_grid_rows) != visual_count:
+            raise ValueError(
+                f"Mismatch between sample visual count ({visual_count}) and grid rows ({len(sample_grid_rows)})."
+            )
+
+        sample_tensors.append(
+            _build_sample_tchw_from_processed(
+                processed_visuals[frame_cursor:total_frames],
+                sample_grid_rows,
+                temporal_patch_size,
+            )
+        )
+        frame_cursor += sum(int(grid[0]) * temporal_patch_size for grid in sample_grid_rows)
+        grid_cursor += visual_count
+
+    if frame_cursor != total_frames:
+        raise ValueError(f"Processed frame count mismatch: consumed {frame_cursor}, available {total_frames}.")
+    if grid_cursor != len(grid_rows):
+        raise ValueError(f"Processed grid row mismatch: consumed {grid_cursor}, available {len(grid_rows)}.")
+
+    return sample_tensors
+
+
 def _get_spatialstack_omega_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
@@ -298,17 +372,16 @@ class SpatialMLLM(lmms):
 
             image_inputs = []
             video_inputs = []
-            image_tchw = []
-            video_tchw = []
+            image_sample_counts = []
+            video_sample_counts = []
             for message in messages:
                 sample_image_inputs, sample_video_inputs = process_vision_info(message)
                 if sample_video_inputs:
                     video_inputs.extend(sample_video_inputs)
-                    for sample_video_input in sample_video_inputs:
-                        video_tchw.append(_convert_video_input_to_tchw(sample_video_input))
+                    video_sample_counts.append(len(sample_video_inputs))
                 elif sample_image_inputs:
                     image_inputs.extend(sample_image_inputs)
-                    image_tchw.append(_convert_image_list_to_tchw(sample_image_inputs))
+                    image_sample_counts.append(len(sample_image_inputs))
 
             inputs = self.processor(
                 text=text,
@@ -318,6 +391,43 @@ class SpatialMLLM(lmms):
                 padding=True,
                 padding_side="left",
             )
+            temporal_patch_size = int(getattr(self.processor.image_processor, "temporal_patch_size", 1))
+            processed_images = inputs.pop("processed_images", None)
+            processed_videos = inputs.pop("processed_videos", None)
+
+            image_tchw = []
+            video_tchw = []
+            if image_sample_counts:
+                if processed_images is not None:
+                    image_tchw = _split_processed_visuals_by_sample(
+                        processed_images,
+                        inputs.get("image_grid_thw"),
+                        image_sample_counts,
+                        temporal_patch_size,
+                    )
+                else:
+                    image_offset = 0
+                    for image_count in image_sample_counts:
+                        sample_image_inputs = image_inputs[image_offset : image_offset + image_count]
+                        image_tchw.append(_convert_image_list_to_tchw(sample_image_inputs))
+                        image_offset += image_count
+
+            if video_sample_counts:
+                if processed_videos is not None:
+                    video_tchw = _split_processed_visuals_by_sample(
+                        processed_videos,
+                        inputs.get("video_grid_thw"),
+                        video_sample_counts,
+                        temporal_patch_size,
+                    )
+                else:
+                    video_offset = 0
+                    for video_count in video_sample_counts:
+                        sample_video_inputs = video_inputs[video_offset : video_offset + video_count]
+                        sample_video_tensors = [_convert_video_input_to_tchw(video_input) for video_input in sample_video_inputs]
+                        video_tchw.append(torch.cat(sample_video_tensors, dim=0))
+                        video_offset += video_count
+
             inputs.update(
                 {
                     "image_tchw": image_tchw if image_tchw else None,
