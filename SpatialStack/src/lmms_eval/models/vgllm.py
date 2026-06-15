@@ -17,7 +17,7 @@ from lmms_eval.api.instance import Instance
 from lmms_eval.api.model import lmms
 from lmms_eval.api.registry import register_model
 
-from qwen_vl.data.utils import load_and_preprocess_images
+from qwen_vl.data.utils import build_qwen3_5_geometry_inputs, load_and_preprocess_images
 from qwen_vl.model.modeling_qwen2_5_vl import Qwen2_5_VLForConditionalGenerationWithVGGT
 
 try:
@@ -250,13 +250,13 @@ class VGLLM(lmms):
 
             text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-            geometry_encoder_inputs = []
+            raw_images_per_sample = []
             image_inputs = []
             patch_size = self.processor.image_processor.patch_size
             merge_size = self.processor.image_processor.merge_size
             for message in messages:
                 vision_info = extract_vision_info(message)
-                cur_geometry_encoder_inputs = []
+                sample_raw_images = []
                 for element in vision_info:
                     if "image" not in element:
                         raise NotImplementedError("Unsupported vision info type")
@@ -271,8 +271,8 @@ class VGLLM(lmms):
                     else:
                         raise NotImplementedError("Unsupported image type")
 
+                    sample_raw_images.append(copy.deepcopy(image))
                     image = load_and_preprocess_images([image])[0]
-                    cur_geometry_encoder_inputs.append(copy.deepcopy(image))
                     _, height, width = image.shape
                     if (width // patch_size) % merge_size > 0:
                         width = width - (width // patch_size) % merge_size * patch_size
@@ -280,8 +280,7 @@ class VGLLM(lmms):
                         height = height - (height // patch_size) % merge_size * patch_size
                     image_inputs.append(image[:, :height, :width])
 
-                if cur_geometry_encoder_inputs:
-                    geometry_encoder_inputs.append(torch.stack(cur_geometry_encoder_inputs))
+                raw_images_per_sample.append(sample_raw_images)
 
             inputs = self.processor(
                 text=text,
@@ -292,10 +291,34 @@ class VGLLM(lmms):
                 do_rescale=False,
             )
             device = "cuda" if self.device_map == "auto" else self.device
-            if geometry_encoder_inputs and (
+            if image_inputs and (
                 getattr(self.model.config, "use_geometry_encoder", False)
                 or getattr(self.model.config, "use_vggt_feature", False)
             ):
+                geometry_encoder_type = getattr(self.model.config, "geometry_encoder_type", "vggt")
+                flat_image_grid_thw = inputs.get("image_grid_thw")
+                if flat_image_grid_thw is None:
+                    raise ValueError("VG-LLM eval expected `image_grid_thw` from the processor but none was returned.")
+
+                geometry_encoder_inputs = []
+                grid_cursor = 0
+                for sample_raw_images in raw_images_per_sample:
+                    if not sample_raw_images:
+                        continue
+                    sample_grid_thw = flat_image_grid_thw[grid_cursor : grid_cursor + len(sample_raw_images)].cpu()
+                    sample_geometry_inputs = build_qwen3_5_geometry_inputs(
+                        sample_raw_images,
+                        sample_grid_thw,
+                        geometry_encoder_type=geometry_encoder_type,
+                    )
+                    geometry_encoder_inputs.append(torch.stack(sample_geometry_inputs))
+                    grid_cursor += len(sample_raw_images)
+
+                if grid_cursor != flat_image_grid_thw.shape[0]:
+                    raise ValueError(
+                        "VG-LLM eval produced a mismatched number of processor image grids and raw images: "
+                        f"{grid_cursor} vs {flat_image_grid_thw.shape[0]}"
+                    )
                 inputs["geometry_encoder_inputs"] = [feat.to(device) for feat in geometry_encoder_inputs]
             inputs = inputs.to(device)
 
