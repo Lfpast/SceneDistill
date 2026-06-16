@@ -1,8 +1,8 @@
 dataset_path: jasonzhango/SPAR-Bench
 # dataset_path: /SSD_DISK/xx/SPAR-Bench
 dataset_kwargs:
-  token: True
-  cache_dir: cache/sparbench
+  cache_dir: ../cache/sparbench
+  local_files_only: true
 task: sparbench
 test_split: test
 output_type: generate_until
@@ -38,4 +38,3 @@ lmms_eval_specific_kwargs:
     na_post_prompt: "Do not response anything other than a single number!"
 metadata:
   - version: 0.0
-
