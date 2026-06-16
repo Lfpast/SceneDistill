@@ -3,3 +3,4 @@ SpatialStack_temp/
 .codex/
 /SpatialStack/scripts/train/train.sh
 /SpatialStack/scripts/evaluation/
+/cache

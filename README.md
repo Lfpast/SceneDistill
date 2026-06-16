@@ -161,9 +161,9 @@ bash scripts/evaluation/eval.sh
 ```
 
 ```bash
-MODEL_PATH=Diankun/Spatial-MLLM-v1.1-Instruct-135K \
-MODEL_IMPL=spatial_mllm \
-MODEL_ARGS_BASE="pretrained=Diankun/Spatial-MLLM-v1.1-Instruct-135K,use_flash_attention_2=true,max_num_frames=32,max_length=12800" \
-BENCHMARKS="vsibench" \
+MODEL_PATH=Qwen/Qwen3.5-4B \
+MODEL_IMPL=qwen3_5 \
+MODEL_ARGS_BASE="pretrained=Qwen/Qwen3.5-4B,use_flash_attention_2=true,max_num_frames=32,max_length=12800,disable_thinking=true" \
+BENCHMARKS="sparbench" \
 bash scripts/evaluation/eval.sh
 ```
