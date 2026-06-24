@@ -160,10 +160,29 @@ BENCHMARKS="cvbench" \
 bash scripts/evaluation/eval.sh
 ```
 
+## Qwen 3.5-4B
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 MODEL_IMPL=qwen3_5 \
 MODEL_ARGS_BASE="pretrained=Qwen/Qwen3.5-4B,use_flash_attention_2=true,max_num_frames=32,max_length=12800,disable_thinking=true" \
-BENCHMARKS="sparbench" \
+BENCHMARKS="vsibench, cvbench, blink_spatial, sparbench, videomme, mmsibench" \
+bash scripts/evaluation/eval.sh
+```
+
+## SpatialStack
+```bash
+MODEL_PATH=Journey9ni/SpatialStack-Qwen3.5-4B \
+MODEL_IMPL=qwen3_5 \
+MODEL_ARGS_BASE="pretrained=Journey9ni/SpatialStack-Qwen3.5-4B,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=facebook/VGGT-1B,disable_thinking=true" \
+BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
+bash scripts/evaluation/eval.sh
+```
+
+## Cambrian-S
+```bash
+MODEL_PATH=nyu-visionx/Cambrian-S-3B \
+MODEL_IMPL=cambrians \
+MODEL_ARGS_BASE="pretrained=nyu-visionx/Cambrian-S-3B,max_num_frames=32,max_length=12800,disable_thinking=true" \
+BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
 bash scripts/evaluation/eval.sh
 ```
