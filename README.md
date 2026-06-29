@@ -186,3 +186,30 @@ MODEL_ARGS_BASE="pretrained=nyu-visionx/Cambrian-S-3B,max_num_frames=32,max_leng
 BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
 bash scripts/evaluation/eval.sh
 ```
+
+## Baseline
+```bash
+MODEL_PATH=/project/peilab/jys/qwen3_5_output/baseline \
+MODEL_IMPL=qwen3_5 \
+MODEL_ARGS_BASE="pretrained=/project/peilab/jys/qwen3_5_output/baseline,use_flash_attention_2=true,max_num_frames=32,max_length=12800,geometry_encoder_path=facebook/VGGT-1B,disable_thinking=true" \
+BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
+bash scripts/evaluation/eval.sh
+```
+
+## VGLLM
+```bash
+MODEL_PATH=zd11024/vgllm-qa-vggt-4b \
+MODEL_IMPL=vgllm \
+MODEL_ARGS_BASE="pretrained=zd11024/vgllm-qa-vggt-4b,use_flash_attention_2=true,max_num_frames=32,max_length=12800" \
+BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
+bash scripts/evaluation/eval.sh
+```
+
+## Spatial-MLLM
+```bash
+MODEL_PATH=Diankun/Spatial-MLLM-v1.1-Instruct-135K \
+MODEL_IMPL=spatial_mllm \
+MODEL_ARGS_BASE="pretrained=Diankun/Spatial-MLLM-v1.1-Instruct-135K,spatial_mllm_repo_path=Spatial-MLLM,use_flash_attention_2=true,max_num_frames=32,max_length=12800" \
+BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
+bash scripts/evaluation/eval.sh
+```
