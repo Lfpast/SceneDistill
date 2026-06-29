@@ -149,6 +149,13 @@ Before running, set these parameters in `scripts/train/train.sh` or via env vars
 Use the Python 3.12 Qwen3.5 environment from [README.md](./README.md), then
 launch:
 
+Extra wandb argument:
+```bash
+RUN_NAME=<run_name> \
+WANDB_PROJECT=spatialstack-omega \
+WANDB_ENTITY=yjiaag-hkust \
+```
+
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
