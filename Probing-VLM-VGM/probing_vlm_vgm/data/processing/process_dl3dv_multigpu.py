@@ -489,6 +489,12 @@ def main():
         default=150,
         help="Number of frames to sample per scene.",
     )
+    parser.add_argument(
+        "--model-load-timeout",
+        type=int,
+        default=300,
+        help="Seconds to wait for all workers to finish loading the VGGT model.",
+    )
     args = parser.parse_args()
 
     # Parse GPU IDs
@@ -562,6 +568,7 @@ def main():
         gpu_ids=gpu_ids,
         model_path=args.model_path,
         num_frames=args.num_frames,
+        model_load_timeout=args.model_load_timeout,
     )
 
     if not manager.start_all_workers():

@@ -32,6 +32,28 @@ export HF_XET_HIGH_PERFORMANCE=1
 export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
 export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 ```
-补充datasets, deepspeed, opencv-python-headless lib
 
-/home/jackson/python/SpatialStack-omega/Phase2_plan.md
+
+```bash
+conda activate probing
+export SS_ROOT=/project/peilab/jys/probing_data
+export HF_HOME=$SS_ROOT/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export HF_XET_HIGH_PERFORMANCE=1
+export PROBING_DATA=/project/peilab/jys/probing_data
+cd /tmp
+
+python download.py \
+    --odir "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+    --subset 1K \
+    --resolution 960P \
+    --file_type images+poses \
+    --clean_cache
+
+wget https://raw.githubusercontent.com/DL3DV-10K/Dataset/main/scripts/download.py
+wget https://kaldir.vc.cit.tum.de/scannet/download-scannet.py
+
+
+
+python download-scannet.py -o "$PROBING_DATA/ScanNet"
+```
