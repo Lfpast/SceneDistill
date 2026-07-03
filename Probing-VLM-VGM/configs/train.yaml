@@ -42,6 +42,10 @@ train: True
 # lightning chooses best weights based on the metric specified in checkpoint callback
 test: False
 
+# Experiments can opt in to logger creation during training. Kept disabled by
+# default because some runs store W&B state on shared filesystems.
+enable_train_logger: False
+
 # simply provide checkpoint path to resume training
 ckpt_path: null
 

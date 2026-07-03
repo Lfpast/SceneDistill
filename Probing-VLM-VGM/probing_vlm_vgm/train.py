@@ -115,13 +115,16 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
 
-    # Loggers (e.g. wandb) only run in test mode — pure training skips them
-    # to avoid wandb's NFS-bound state files contending with feature reads.
-    if cfg.get("test"):
+    # Test runs always use configured loggers. Training runs opt in explicitly
+    # because some experiments keep W&B state on shared filesystems.
+    use_loggers = cfg.get("test") or (
+        cfg.get("train") and cfg.get("enable_train_logger", False)
+    )
+    if use_loggers:
         log.info("Instantiating loggers...")
         logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
     else:
-        log.info("Skipping loggers (test=False — no wandb in train-only runs).")
+        log.info("Skipping loggers (training logger is not enabled).")
         logger = []
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")

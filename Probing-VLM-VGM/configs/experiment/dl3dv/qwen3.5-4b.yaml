@@ -16,6 +16,7 @@ task_name: dl3dv
 job_name: default # must set in the command line
 
 autoresume: true
+enable_train_logger: true
 # ckpt_path: /path/to/resume.ckpt  # uncomment to resume training from a checkpoint
 
 gt_num_frames: 4
@@ -47,8 +48,11 @@ data:
 
 logger:
   wandb:
-    name: vlm_${task_name}_${job_name}
-    group: ${task_name}
+    entity: yjiaag-hkust
+    project: 3D-Geometry
+    name: ${job_name}
+    group: qwen3.5-4b
+    tags: [qwen3.5-4b, "${feat_postfix}"]
 
 model:
   probe_type: pixalign
