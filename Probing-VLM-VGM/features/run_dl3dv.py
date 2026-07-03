@@ -31,6 +31,20 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
         --context-len 76 \
         --query-idx-divisor 4 \
         --output-layers 22
+
+Qwen3.5-4B, normalized-depth baseline layer 20:
+CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
+        --vfm qwen35 \
+        --vfm-name qwen3.5-4b \
+        --subset all \
+        --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+        --out-root data/DL3DV/FEAT \
+        --model-path Qwen/Qwen3.5-4B \
+        --model-type qwen35 \
+        --use-query-frame-indices \
+        --context-len 76 \
+        --query-idx-divisor 4 \
+        --output-layers 20
 """
 
 import argparse
@@ -134,7 +148,7 @@ def main():
     parser.add_argument(
         "--vfm",
         default="wan",
-        choices=["wan", "opensora", "cogvideox", "aether", "internvl", "qwen3vl", "qwen25vl"],
+        choices=["wan", "opensora", "cogvideox", "aether", "internvl", "qwen3vl", "qwen25vl", "qwen35"],
         help="Which extractor module to invoke",
     )
 

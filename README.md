@@ -213,3 +213,54 @@ MODEL_ARGS_BASE="pretrained=Diankun/Spatial-MLLM-v1.1-Instruct-135K,spatial_mllm
 BENCHMARKS="vsibench, cvbench, sparbench, videomme" \
 bash scripts/evaluation/eval.sh
 ```
+
+---
+
+# Probing Experiment
+
+```bash
+conda activate probing
+export SS_ROOT=/project/peilab/jys/probing_data
+export HF_HOME=$SS_ROOT/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export HF_XET_HIGH_PERFORMANCE=1
+export PROBING_DATA=/project/peilab/jys/probing_data
+cd /tmp
+
+python download.py \
+    --odir "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+    --subset 1K \
+    --resolution 960P \
+    --file_type images+poses \
+    --clean_cache
+
+wget https://raw.githubusercontent.com/DL3DV-10K/Dataset/main/scripts/download.py
+wget https://kaldir.vc.cit.tum.de/scannet/download-scannet.py
+
+
+python download-scannet.py -o "$PROBING_DATA/ScanNet"
+```
+
+
+## Frozen Feature Extraction
+
+### Qwen 3.5
+
+```bash
+export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+export PROBING_DATA=/project/peilab/jys/probing_data
+
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b \
+  --subset all \
+  --dl3dv-root "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+  --processed-root "$PROBING_DATA/DL3DV/DL3DV-processed" \
+  --out-root "$PROBING_DATA/DL3DV/FEAT" \
+  --model-path "$QWEN35_PATH" \
+  --model-type qwen35 \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 20
+```

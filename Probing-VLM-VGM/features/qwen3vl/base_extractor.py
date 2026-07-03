@@ -100,6 +100,9 @@ class BaseQwen3VLExtractor(ABC):
     - Hidden states extraction from LLM layers
     - Reshaping to spatial format for probe training
     """
+
+    model_class = Qwen3VLForConditionalGeneration
+    model_family = "Qwen3-VL"
     
     def __init__(
         self,
@@ -136,12 +139,12 @@ class BaseQwen3VLExtractor(ABC):
         self.target_size = target_size
         self.attn_implementation = attn_implementation
         
-        logger.info(f"Loading Qwen3-VL model from {model_path}")
+        logger.info(f"Loading {self.model_family} model from {model_path}")
         logger.info(f"Target device: {self.device}")
         logger.info(f"Attention implementation: {self.attn_implementation}")
         
         # Load model
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+        self.model = self.model_class.from_pretrained(
             model_path,
             torch_dtype=torch_dtype,
             attn_implementation=attn_implementation,

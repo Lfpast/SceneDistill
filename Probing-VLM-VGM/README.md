@@ -157,6 +157,13 @@ Supported model families include:
   - [Qwen3-VL-2B](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct)
   - [Qwen3-VL-4B](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct)
   - [Qwen3-VL-8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct)
+  - [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
+
+The Qwen3.5 extractor requires the SpatialStack-compatible
+`transformers==5.3.0` environment. Its example layer 20 is a normalized-depth
+baseline relative to Qwen3-VL-8B layer 22, not a paper-validated layer choice.
+Plain Qwen3.5 SFT checkpoints are compatible; geometry-enabled SpatialStack
+checkpoints need a separate extractor that supplies their geometry inputs.
 
 ### DL3DV Examples
 
@@ -186,6 +193,21 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 22
+
+# DL3DV VLM features: Qwen3.5-4B, layer 20.
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b \
+  --subset all \
+  --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+  --processed-root data/DL3DV/DL3DV-processed \
+  --out-root data/DL3DV/FEAT \
+  --model-path Qwen/Qwen3.5-4B \
+  --model-type qwen35 \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 20
 ```
 
 ### ScanNet Examples

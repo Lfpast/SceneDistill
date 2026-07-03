@@ -46,9 +46,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
+def parse_args(
+    argv: List[str] | None = None,
+    *,
+    model_types=("qwen3vl", "sensenova"),
+    default_model_type="qwen3vl",
+    model_family="Qwen3-VL",
+    default_layers=(9, 18, 27, 36),
+) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Qwen3-VL feature extractor for probe training",
+        description=f"{model_family} feature extractor for probe training",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     
@@ -83,13 +90,13 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--model-path",
         required=True,
-        help="Path to Qwen3-VL model (local or HuggingFace)",
+        help=f"Path to {model_family} model (local or HuggingFace)",
     )
     parser.add_argument(
         "--model-type",
-        choices=["qwen3vl", "sensenova"],
-        default="qwen3vl",
-        help="Model type: 'qwen3vl' for original, 'sensenova' for spatial SI version",
+        choices=model_types,
+        default=default_model_type,
+        help=f"Model type ({', '.join(model_types)})",
     )
     
     # Extraction configuration
@@ -103,8 +110,8 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "--output-layers",
         nargs="+",
         type=int,
-        default=[9, 18, 27, 36],
-        help="Layer indices to extract features from (Qwen3-VL-8B has 36 layers)",
+        default=list(default_layers),
+        help=f"Layer indices to extract from {model_family}",
     )
     parser.add_argument(
         "--prompt",
@@ -175,8 +182,22 @@ def check_existing_files(out_dir: str, layers: List[int]) -> List[int]:
     return missing
 
 
-def main(argv: List[str] | None = None) -> None:
-    args = parse_args(argv)
+def main(
+    argv: List[str] | None = None,
+    *,
+    extractor_factory=get_qwen3vl_extractor,
+    model_types=("qwen3vl", "sensenova"),
+    default_model_type="qwen3vl",
+    model_family="Qwen3-VL",
+    default_layers=(9, 18, 27, 36),
+) -> None:
+    args = parse_args(
+        argv,
+        model_types=model_types,
+        default_model_type=default_model_type,
+        model_family=model_family,
+        default_layers=default_layers,
+    )
     
     # Create output directory
     os.makedirs(args.out_dir, exist_ok=True)
@@ -230,7 +251,7 @@ def main(argv: List[str] | None = None) -> None:
         f"Device: {args.device}, Layers: {args.output_layers}, "
         f"target_size: {target_size}, attn: {args.attn_implementation}"
     )
-    extractor = get_qwen3vl_extractor(
+    extractor = extractor_factory(
         model_path=args.model_path,
         model_type=args.model_type,
         select_layers=tuple(args.output_layers),
