@@ -5,8 +5,8 @@ defaults:
 
 
 # Qwen3.5-4B probe training configuration.
-# The frozen language hidden states have width 2560. Features are written to
-# <out_root>/qwen3.5-4b/ by features/run_dl3dv.py.
+# The frozen language hidden states have width 2560. Each layer is read from
+# <feat_root>/qwen3.5-4b/LayerN/, where N is parsed from feat_postfix.
 
 seed: 42
 

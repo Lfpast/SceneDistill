@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import re
 
 # Copyright (C) 2024-present Naver Corporation. All rights reserved.
 # Licensed under CC BY-NC-SA 4.0 (non-commercial use only).
@@ -220,6 +221,15 @@ class VideoProbeDataset(EasyDataset):
         self.debug = debug
         self.plucker_rescale = plucker_rescale
         self.root_vfm = root_vfm
+        self.vfm_layer_dir = None
+        if self.vfm_name == "qwen3.5-4b":
+            layer_match = re.fullmatch(r"_layer(\d+)", self.feat_postfix)
+            if layer_match is None:
+                raise ValueError(
+                    "qwen3.5-4b feat_postfix must have the form '_layerN', "
+                    f"got {self.feat_postfix!r}"
+                )
+            self.vfm_layer_dir = f"Layer{int(layer_match.group(1))}"
         self.use_mask = use_mask
         self.context_len = context_len  # coverage of each context window
         self.seen_ratio = seen_ratio  # ratio of seen frames in the context window
@@ -403,9 +413,11 @@ class VideoProbeDataset(EasyDataset):
         # get the vfm feature path
         scene_hash = Path(self.scenes[idx]).stem
         current_subset = self.scenes[idx].split("/")[-2]
+        vfm_path_parts = [self.root_vfm, self.vfm_name]
+        if self.vfm_layer_dir is not None:
+            vfm_path_parts.append(self.vfm_layer_dir)
         vfm_feat_path = os.path.join(
-            self.root_vfm,
-            self.vfm_name,
+            *vfm_path_parts,
             current_subset,
             scene_hash,
             f"feature{self.feat_postfix}.sft",
