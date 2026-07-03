@@ -22,7 +22,13 @@ gt_num_frames: 4
 batch_size: 10
 
 paths:
-  run_folder_name: vlm_${task_name}_${job_name}
+  log_dir: /project/peilab/jys/probing/DL3DV/qwen3.5-4b
+  run_folder_name: ${job_name}
+
+# Keep Qwen3.5-4B runs directly under its dedicated output root.
+hydra:
+  run:
+    dir: ${paths.log_dir}/${paths.run_folder_name}
 
 # Extracted layer sweep: 1, 5, 9, 13, 17, 21, 25, 29, 32.
 # Override feat_postfix on the command line for each layer.
