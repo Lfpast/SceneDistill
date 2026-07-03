@@ -173,6 +173,7 @@ class VideoProbeDataset(EasyDataset):
         "qwen3-vl-8b",
         "qwen3-vl-2b",
         "qwen3-vl-4b",
+        "qwen3.5-4b",
         "qwen3-vl-8b-sensenova",
         "qwen2.5-vl-3b",
         "qwen2.5-vl-7b",

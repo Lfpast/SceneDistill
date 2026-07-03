@@ -377,6 +377,15 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   job_name=qwen3-vl-8b \
   trainer.devices=2
 
+# Qwen3.5-4B single-layer 3D probe. Override feat_postfix for the layer sweep.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/qwen3.5-4b \
+  job_name=qwen3.5-4b_layer17_seed42 \
+  data.data_root=/path/to/DL3DV/DL3DV-processed \
+  data.feat_root=/path/to/DL3DV/FEAT \
+  feat_postfix=_layer17 \
+  trainer.devices=2
+
 # WAN2.1-T2V-14B 3D probe.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/wan-t2v-14b \
