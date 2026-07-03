@@ -264,3 +264,23 @@ python -m features.run_dl3dv \
   --query-idx-divisor 4 \
   --output-layers 20
 ```
+
+### 3D Geometry
+
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+export PROBING_DATA=/project/peilab/jys/probing_data
+
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/qwen3.5-4b \
+  job_name=qwen3.5-4b_layer1_smoke \
+  data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
+  data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
+  feat_postfix=_layer1 \
+  batch_size=1 \
+  trainer.devices=1 \
+  +trainer.fast_dev_run=true \
+  data.data_module.num_workers=0 \
+  data.data_module.num_workers_val=0
+```
