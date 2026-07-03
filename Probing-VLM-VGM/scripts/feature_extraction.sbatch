@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=qwen35-sbatch
+#SBATCH --job-name=feature-extraction
 #SBATCH --partition=normal            # Change to your cluster's GPU partition
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:6
+#SBATCH --gres=gpu:8
 #SBATCH --time=10:00:00
 #SBATCH --account=peilab
 #SBATCH --output=slurm_logs/%x_%j.out
@@ -21,7 +21,7 @@ cd "$PROJECT_ROOT"
 mkdir -p slurm_logs
 mkdir -p .cache/triton
 
-source activate probing
+source activate Probing
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 
@@ -31,6 +31,8 @@ export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export PROBING_DATA=/project/peilab/jys/probing_data
 export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+
+cd /home/dduab/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
 
 python -m features.run_dl3dv \
   --vfm qwen35 \

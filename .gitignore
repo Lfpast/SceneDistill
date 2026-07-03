@@ -4,3 +4,4 @@ SpatialStack_temp/
 /SpatialStack/scripts/train/train.sh
 /SpatialStack/scripts/evaluation/
 /cache
+slurm_logs/
