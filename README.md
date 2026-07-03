@@ -219,7 +219,7 @@ bash scripts/evaluation/eval.sh
 # Probing Experiment
 
 ```bash
-conda activate probing
+conda activate Probing
 export SS_ROOT=/project/peilab/jys/probing_data
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
