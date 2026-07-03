@@ -219,6 +219,8 @@ bash scripts/evaluation/eval.sh
 # Probing Experiment
 
 ```bash
+module load slurm
+module load cuda12.2/toolkit/12.2.2
 conda activate Probing
 export SS_ROOT=/project/peilab/jys/probing_data
 export HF_HOME=$SS_ROOT/hf_cache
@@ -269,18 +271,16 @@ python -m features.run_dl3dv \
 
 ```bash
 cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
-
 export PROBING_DATA=/project/peilab/jys/probing_data
 
-CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/qwen3.5-4b \
-  job_name=qwen3.5-4b_layer1_smoke \
+  job_name="Layer29" \
   data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
   data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
-  feat_postfix=_layer1 \
-  batch_size=1 \
-  trainer.devices=1 \
-  +trainer.fast_dev_run=true \
-  data.data_module.num_workers=0 \
-  data.data_module.num_workers_val=0
+  feat_postfix="_layer29" \
+  seed=42 \
+  trainer.devices=2 \
+  trainer.max_epochs=60 \
+  callbacks.model_checkpoint.save_top_k=0
 ```
