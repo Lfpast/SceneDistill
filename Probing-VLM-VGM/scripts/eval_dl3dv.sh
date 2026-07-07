@@ -12,7 +12,7 @@
 #
 # Usage:
 #   CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh --views 4 --video-tss "[15, 26]" --video-tss "[15, 22]" --project 3d-eval2
-#                              [--project <wandb-project>] [--run-name <exact-run-dir>] [--vfm wan-t2v-1.3b] [--vfm qwen3-vl-8b] [--dry-run] [--skip-done]
+#                              [--runs-dir <dir>] [--job-suffix <suffix>] [--project <wandb-project>] [--run-name <exact-run-dir>] [--vfm wan-t2v-1.3b] [--vfm qwen3-vl-8b] [--dry-run] [--skip-done]
 #
 # Notes:
 #   * Run directories can use short release names such as
@@ -60,6 +60,7 @@ VFM_LIST=()  # only run ckpts whose name matches one of these VFM substrings. Em
 BD_LIST=()   # only run ckpts whose name contains _bdN_. Empty = no filter.
 WANDB_PROJECT=""
 EVAL_TASK_NAME="dl3dv-eval"
+EVAL_JOB_SUFFIX=""
 CASE_OUTPUT_ROOT="" # Optional extra case-study root organized as scene/model files.
 CASE_OUTPUT_KEY=""
 VIZ_BATCH_SAMPLES=""
@@ -76,6 +77,8 @@ while [[ $# -gt 0 ]]; do
     --limit-test-scenes) LIMIT_TEST_SCENES="$2"; shift 2 ;;
     --limit-test-batches) LIMIT_TEST_BATCHES="$2"; shift 2 ;;
     --video-tss) VIDEO_TSS_LIST+=("$2"); shift 2 ;;
+    --runs-dir) RUNS_DIR="$2"; shift 2 ;;
+    --job-suffix) EVAL_JOB_SUFFIX="$2"; shift 2 ;;
     --run-name) RUN_NAME_LIST+=("$2"); shift 2 ;;
     --vfm) VFM_LIST+=("$2"); shift 2 ;;
     --bd) BD_LIST+=("$2"); shift 2 ;;
@@ -378,6 +381,10 @@ for RUN_DIR in "${RUN_DIRS[@]}"; do
     # inner single quotes are part of Hydra's value grammar.
     "ckpt_path='${CKPT}'"
   )
+
+  if [[ -n "$EVAL_JOB_SUFFIX" ]]; then
+    ARGS+=("job_name=${RUN_NAME}${EVAL_JOB_SUFFIX}")
+  fi
 
   if [[ "$VIZ_SAMPLES" -gt 0 ]]; then
     ARGS+=("+trainer.limit_test_batches=1")

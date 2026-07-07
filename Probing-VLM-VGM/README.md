@@ -208,6 +208,21 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 20
+
+# DL3DV visual-encoder features: Qwen3.5-4B, layer sweep.
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b-visual \
+  --subset all \
+  --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+  --processed-root data/DL3DV/DL3DV-processed \
+  --out-root data/DL3DV/FEAT \
+  --model-path Qwen/Qwen3.5-4B \
+  --model-type qwen35-visual \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1 5 9 13 17 21 24
 ```
 
 ### ScanNet Examples
@@ -386,12 +401,25 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer17 \
   trainer.devices=2
 
+# Qwen3.5-4B visual-encoder single-layer 3D probe.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/qwen3.5-4b-visual \
+  job_name=qwen3.5-4b-visual_layer17_seed42 \
+  data.data_root=/path/to/DL3DV/DL3DV-processed \
+  data.feat_root=/path/to/DL3DV/FEAT \
+  feat_postfix=_layer17 \
+  trainer.devices=2
+
 # WAN2.1-T2V-14B 3D probe.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/wan-t2v-14b \
   job_name=wan-t2v-14b \
   trainer.devices=2
 ```
+
+For the visual-encoder probe, Qwen3.5 has `vision_config.hidden_size=1024` and
+`vision_config.depth=24`; the config therefore defaults to `vfm_channels=1024`
+and the recommended layer sweep is `1 5 9 13 17 21 24`.
 
 The resulting checkpoints are saved under:
 
@@ -410,6 +438,16 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
   --vfm qwen3-vl-8b \
   --vfm wan-t2v-14b \
   --task-name dl3dv-eval-main \
+  --skip-done
+
+# Qwen3.5-4B visual-encoder probes use a custom run root.
+CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
+  --runs-dir /project/peilab/jys/probing/DL3DV/qwen3.5-4b-visual \
+  --job-suffix _eval \
+  --views 4 \
+  --vfm qwen3.5-4b-visual \
+  --task-name dl3dv-eval-qwen35-visual \
+  --project 3D-Geometry \
   --skip-done
 ```
 
