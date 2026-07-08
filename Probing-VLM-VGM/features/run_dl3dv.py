@@ -60,6 +60,20 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
         --context-len 76 \
         --query-idx-divisor 4 \
         --output-layers 1 5 9 13 17 21 24
+
+VGGT-Omega, cached geometry layers:
+CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
+        --vfm vggt_omega \
+        --vfm-name vggt-omega \
+        --subset all \
+        --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+        --processed-root data/DL3DV/DL3DV-processed \
+        --out-root data/DL3DV/FEAT \
+        --model-path ckpt/vggt_omega_1b_512.pt \
+        --use-query-frame-indices \
+        --context-len 76 \
+        --query-idx-divisor 4 \
+        --output-layers 4 11 17 23
 """
 
 import argparse
@@ -163,7 +177,7 @@ def main():
     parser.add_argument(
         "--vfm",
         default="wan",
-        choices=["wan", "opensora", "cogvideox", "aether", "internvl", "qwen3vl", "qwen25vl", "qwen35"],
+        choices=["wan", "opensora", "cogvideox", "aether", "internvl", "qwen3vl", "qwen25vl", "qwen35", "vggt_omega"],
         help="Which extractor module to invoke",
     )
 

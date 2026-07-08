@@ -223,6 +223,20 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 1 5 9 13 17 21 24
+
+# DL3DV VGM features: VGGT-Omega, cached geometry layers.
+python -m features.run_dl3dv \
+  --vfm vggt_omega \
+  --vfm-name vggt-omega \
+  --subset all \
+  --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+  --processed-root data/DL3DV/DL3DV-processed \
+  --out-root data/DL3DV/FEAT \
+  --model-path ckpt/vggt_omega_1b_512.pt \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 4 11 17 23
 ```
 
 ### ScanNet Examples
@@ -410,6 +424,15 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer17 \
   trainer.devices=2
 
+# VGGT-Omega single-layer 3D probe. Override feat_postfix for the layer sweep.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/vggt-omega \
+  job_name=vggt-omega_layer23_seed42 \
+  data.data_root=/path/to/DL3DV/DL3DV-processed \
+  data.feat_root=/path/to/DL3DV/FEAT \
+  feat_postfix=_layer23 \
+  trainer.devices=2
+
 # WAN2.1-T2V-14B 3D probe.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/wan-t2v-14b \
@@ -447,6 +470,16 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
   --views 4 \
   --vfm qwen3.5-4b-visual \
   --task-name dl3dv-eval-qwen35-visual \
+  --project 3D-Geometry \
+  --skip-done
+
+# VGGT-Omega probes use a custom run root.
+CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
+  --runs-dir /project/peilab/jys/probing/DL3DV/vggt-omega \
+  --job-suffix _eval \
+  --views 4 \
+  --vfm vggt-omega \
+  --task-name dl3dv-eval-vggt-omega \
   --project 3D-Geometry \
   --skip-done
 ```

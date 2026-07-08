@@ -176,6 +176,7 @@ class VideoProbeDataset(EasyDataset):
         "qwen3-vl-4b",
         "qwen3.5-4b",
         "qwen3.5-4b-visual",
+        "vggt-omega",
         "qwen3-vl-8b-sensenova",
         "qwen2.5-vl-3b",
         "qwen2.5-vl-7b",
@@ -623,7 +624,7 @@ class VideoProbeDataset(EasyDataset):
                 vfm_feat = vfm_feat[vfm_idx]
                 vfm_idx = torch.arange(vfm_feat.shape[0], device=vfm_feat.device)
         elif self.vfm_name in self.VLM_VFMS:
-            # InternVL/Qwen3VL features are extracted using query frame indices
+            # InternVL/Qwen3VL/VGGT-Omega features are extracted using query frame indices
             # Features are stored as (T, H, W, C) where T = number of query frame indices
             # Query frame indices: [0, 1, 5, 9, 13, ..., 73] (20 frames for context_len=76, divisor=4)
             
@@ -646,7 +647,7 @@ class VideoProbeDataset(EasyDataset):
                     layer_feat = load_file(layer_path)["feat"]  # (T, H, W, C)
                     vfm_feat_layers.append(layer_feat)
                 else:
-                    raise FileNotFoundError(f"InternVL feature not found: {layer_path}")
+                    raise FileNotFoundError(f"Query-indexed feature not found: {layer_path}")
             
             if len(vfm_feat_layers) == 1:
                 vfm_feat = vfm_feat_layers[0]  # (T, H, W, C)
