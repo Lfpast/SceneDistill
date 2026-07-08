@@ -5,7 +5,7 @@ defaults:
 
 
 # VGGT-Omega geometry-encoder probe training configuration.
-# Features are extracted from cached Omega aggregator layers {4, 11, 17, 23}
+# Feature extraction accepts 1-based Omega aggregator layers 1-24.
 # and stored under <feat_root>/vggt-omega/<subset>/<scene>/feature_layerN.sft.
 
 seed: 42
@@ -33,8 +33,8 @@ hydra:
   run:
     dir: ${paths.log_dir}/${paths.run_folder_name}
 
-# Override feat_postfix for layer sweeps: _layer4, _layer11, _layer17, _layer23.
-feat_postfix: _layer23
+# Override feat_postfix for layer sweeps, e.g. _layer1, _layer4, ..., _layer24.
+feat_postfix: _layer24
 
 data:
   data_module:

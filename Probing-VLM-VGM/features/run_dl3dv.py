@@ -61,7 +61,7 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
         --query-idx-divisor 4 \
         --output-layers 1 5 9 13 17 21 24
 
-VGGT-Omega, cached geometry layers:
+VGGT-Omega, 1-based layer sweep:
 CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
         --vfm vggt_omega \
         --vfm-name vggt-omega \
@@ -73,7 +73,7 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
         --use-query-frame-indices \
         --context-len 76 \
         --query-idx-divisor 4 \
-        --output-layers 4 11 17 23
+        --output-layers 1 4 8 12 16 20 24
 """
 
 import argparse

@@ -224,7 +224,7 @@ python -m features.run_dl3dv \
   --query-idx-divisor 4 \
   --output-layers 1 5 9 13 17 21 24
 
-# DL3DV VGM features: VGGT-Omega, cached geometry layers.
+# DL3DV VGM features: VGGT-Omega, 1-based layer sweep.
 python -m features.run_dl3dv \
   --vfm vggt_omega \
   --vfm-name vggt-omega \
@@ -236,7 +236,7 @@ python -m features.run_dl3dv \
   --use-query-frame-indices \
   --context-len 76 \
   --query-idx-divisor 4 \
-  --output-layers 4 11 17 23
+  --output-layers 1 4 8 12 16 20 24
 ```
 
 ### ScanNet Examples
@@ -427,10 +427,10 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
 # VGGT-Omega single-layer 3D probe. Override feat_postfix for the layer sweep.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/vggt-omega \
-  job_name=vggt-omega_layer23_seed42 \
+  job_name=vggt-omega_layer24_seed42 \
   data.data_root=/path/to/DL3DV/DL3DV-processed \
   data.feat_root=/path/to/DL3DV/FEAT \
-  feat_postfix=_layer23 \
+  feat_postfix=_layer24 \
   trainer.devices=2
 
 # WAN2.1-T2V-14B 3D probe.

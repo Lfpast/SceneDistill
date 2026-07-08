@@ -24,7 +24,7 @@ from safetensors.torch import load_file, save_file
 
 
 logger = logging.getLogger(__name__)
-_SUPPORTED_LAYERS = (4, 11, 17, 23)
+_SUPPORTED_LAYERS = tuple(range(1, 25))
 
 
 def _workspace_root() -> Path:
@@ -149,6 +149,40 @@ def _reshape_patch_tokens(feat: torch.Tensor, images: torch.Tensor, patch_size: 
     return feat.reshape(n_frames, h_patch, w_patch, feat.shape[-1]).contiguous()
 
 
+def _layer_to_block_idx(layer: int) -> int:
+    if layer not in _SUPPORTED_LAYERS:
+        raise ValueError(
+            f"Unsupported VGGT-Omega layer {layer}. Supported layers: 1-24."
+        )
+    return layer - 1
+
+
+def _forward_layers(encoder, images: torch.Tensor, layers: List[int]) -> dict[int, torch.Tensor]:
+    block_indices = [_layer_to_block_idx(layer) for layer in layers]
+    encoder.vggt_omega.eval()
+    encoder.vggt_omega.aggregator.cached_layer_indices = set(block_indices)
+
+    model_images = encoder._apply_reference_frame_transform(images)
+    dtype, autocast_context = encoder._autocast_context(model_images)
+
+    with torch.no_grad():
+        with autocast_context:
+            aggregated_tokens_list, patch_token_start = encoder.vggt_omega.aggregator(
+                model_images[None]
+            )
+
+    features = {}
+    for layer, block_idx in zip(layers, block_indices):
+        tokens = aggregated_tokens_list[block_idx]
+        if tokens is None:
+            raise RuntimeError(
+                f"VGGT-Omega layer {layer} (block index {block_idx}) was not cached."
+            )
+        tokens = encoder._apply_inverse_reference_frame_transform(tokens[0])
+        features[layer] = tokens[:, patch_token_start:].to(dtype).contiguous()
+    return features
+
+
 def _missing_layers(out_dir: str, layers: List[int], force: bool) -> List[int]:
     if force:
         return layers
@@ -175,7 +209,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-resolution", type=int, default=512)
     parser.add_argument("--preprocess-mode", choices=["balanced", "max_size"], default="balanced")
     parser.add_argument("--num-frames", type=int, default=16)
-    parser.add_argument("--output-layers", nargs="+", type=int, default=[23])
+    parser.add_argument("--output-layers", nargs="+", type=int, default=[24])
     parser.add_argument("--use-query-frame-indices", action="store_true")
     parser.add_argument("--context-len", type=int, default=76)
     parser.add_argument("--query-idx-divisor", type=int, default=4)
@@ -196,7 +230,7 @@ def main(argv: List[str] | None = None) -> None:
     if unsupported:
         raise ValueError(
             f"Unsupported VGGT-Omega layer(s): {unsupported}. "
-            f"Supported cached layers: {list(_SUPPORTED_LAYERS)}."
+            "Supported layers: 1-24."
         )
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -229,9 +263,9 @@ def main(argv: List[str] | None = None) -> None:
     logger.info("Preprocessed images shape: %s", tuple(images.shape))
 
     encoder = _load_encoder(args.model_path, args.device, args.reference_frame)
-    feats = encoder.encode_layers(images, layer_indices=layers)
+    feats = _forward_layers(encoder, images, layers)
 
-    for layer, feat in zip(layers, feats):
+    for layer, feat in feats.items():
         reshaped = _reshape_patch_tokens(feat, images, patch_size=16)
         out_path = os.path.join(args.out_dir, f"feature_layer{layer}.sft")
         save_file({"feat": reshaped.half().cpu()}, out_path)
