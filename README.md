@@ -249,7 +249,6 @@ python download-scannet.py -o "$PROBING_DATA/ScanNet"
 ### Qwen 3.5
 
 ```bash
-export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
 export PROBING_DATA=/project/peilab/jys/probing_data
 
 python -m features.run_dl3dv \
@@ -265,20 +264,35 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 20
+
+# Visual Encoder
+export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b-visual \
+  --subset all \
+  --dl3dv-root "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+  --processed-root "$PROBING_DATA/DL3DV/DL3DV-processed" \
+  --out-root "$PROBING_DATA/DL3DV/FEAT" \
+  --model-path "$QWEN35_PATH" \
+  --model-type qwen35-visual \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 24
 ```
 
 ### 3D Geometry
 
 ```bash
 cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
-export PROBING_DATA=/project/peilab/jys/probing_data
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
-  experiment=dl3dv/qwen3.5-4b \
-  job_name="Layer29" \
+  experiment=dl3dv/qwen3.5-4b-visual \
+  job_name="Layer20" \
   data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
   data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
-  feat_postfix="_layer29" \
+  feat_postfix="_layer20" \
   seed=42 \
   trainer.devices=2 \
   trainer.max_epochs=60 \
@@ -286,8 +300,8 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
 
 # Evaluation
 cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+ROOT=/project/peilab/jys/probing/DL3DV/qwen3.5-4b-visual
 export PROBING_DATA=/project/peilab/jys/probing_data
-ROOT=/project/peilab/jys/probing/DL3DV/qwen3.5-4b
 TRAIN_RUN=Layer32
 EVAL_RUN=${TRAIN_RUN}_eval
 

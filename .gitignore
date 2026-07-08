@@ -5,3 +5,5 @@ SpatialStack_temp/
 /SpatialStack/scripts/evaluation/
 /cache
 slurm_logs/
+train.sbatch
+eval.sh
