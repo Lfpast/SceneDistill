@@ -5,7 +5,7 @@ defaults:
 
 
 # VGGT-Omega geometry-encoder probe training configuration.
-# Feature extraction accepts 1-based Omega aggregator layers 1-24.
+# Feature extraction accepts 1-based Omega aggregator layers 1, 4, 8, 12, 16, 20, 24.
 # and stored under <feat_root>/vggt-omega/<subset>/<scene>/feature_layerN.sft.
 
 seed: 42

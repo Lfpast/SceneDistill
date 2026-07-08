@@ -15,6 +15,7 @@ import glob
 import logging
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import List
 
@@ -24,7 +25,7 @@ from safetensors.torch import load_file, save_file
 
 
 logger = logging.getLogger(__name__)
-_SUPPORTED_LAYERS = tuple(range(1, 25))
+_SUPPORTED_LAYERS = (1, 4, 8, 12, 16, 20, 24)
 
 
 def _workspace_root() -> Path:
@@ -39,6 +40,7 @@ def _add_runtime_paths() -> None:
             sys.path.insert(0, path_str)
 
 
+@lru_cache(maxsize=2)
 def _load_encoder(model_path: str, device: str, reference_frame: str):
     _add_runtime_paths()
     from qwen_vl.model.geometry_encoders.base import GeometryEncoderConfig
@@ -152,7 +154,8 @@ def _reshape_patch_tokens(feat: torch.Tensor, images: torch.Tensor, patch_size: 
 def _layer_to_block_idx(layer: int) -> int:
     if layer not in _SUPPORTED_LAYERS:
         raise ValueError(
-            f"Unsupported VGGT-Omega layer {layer}. Supported layers: 1-24."
+            f"Unsupported VGGT-Omega layer {layer}. Supported layers: "
+            f"{list(_SUPPORTED_LAYERS)}."
         )
     return layer - 1
 
@@ -230,7 +233,7 @@ def main(argv: List[str] | None = None) -> None:
     if unsupported:
         raise ValueError(
             f"Unsupported VGGT-Omega layer(s): {unsupported}. "
-            "Supported layers: 1-24."
+            f"Supported layers: {list(_SUPPORTED_LAYERS)}."
         )
 
     os.makedirs(args.out_dir, exist_ok=True)
