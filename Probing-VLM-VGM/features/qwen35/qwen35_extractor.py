@@ -90,6 +90,7 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
         self._spatialstack_config = config
         self.geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
         super().__init__(model_path, select_layers, question, **kwargs)
+        self._optimize_spatialstack_geometry_encoder_cache()
 
     def _load_model(self, model_path: str):
         return self.model_class.from_pretrained(
@@ -100,6 +101,18 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
             device_map=None,
             low_cpu_mem_usage=False,
         )
+
+    def _optimize_spatialstack_geometry_encoder_cache(self) -> None:
+        if self.geometry_encoder_type != "vggt_omega":
+            return
+        geometry_encoder = getattr(self.model.model, "geometry_encoder", None)
+        aggregator = getattr(getattr(geometry_encoder, "vggt_omega", None), "aggregator", None)
+        geometry_layers = getattr(self.config, "geometry_encoder_layers", None)
+        if aggregator is None or not geometry_layers:
+            return
+        cache_layers = {int(layer) for layer in geometry_layers if int(layer) >= 0}
+        if cache_layers:
+            aggregator.cached_layer_indices = cache_layers
 
     def _forward_with_spatialstack_hidden_states(
         self,
@@ -145,6 +158,7 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
             self.model.model(
                 **inputs_on_device,
                 geometry_encoder_inputs=geometry_encoder_inputs,
+                use_cache=False,
             )
         finally:
             for handle in handles:
