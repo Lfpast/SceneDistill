@@ -227,6 +227,7 @@ export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export PROBING_DATA=/project/peilab/jys/probing_data
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
 cd /tmp
 
 python download.py \
@@ -250,7 +251,6 @@ python download-scannet.py -o "$PROBING_DATA/ScanNet"
 
 ```bash
 export PROBING_DATA=/project/peilab/jys/probing_data
-
 python -m features.run_dl3dv \
   --vfm qwen35 \
   --vfm-name qwen3.5-4b \
@@ -282,7 +282,26 @@ python -m features.run_dl3dv \
   --output-layers 24
 ```
 
-### 3D Geometry
+### VGGT-Omega
+```bash
+export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
+CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
+  --vfm vggt_omega \
+  --vfm-name vggt-omega \
+  --subset all \
+  --dl3dv-root "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+  --processed-root "$PROBING_DATA/DL3DV/DL3DV-processed" \
+  --out-root "$PROBING_DATA/DL3DV/FEAT" \
+  --model-path "$VGGT_OMEGA_PATH" \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 24
+```
+
+## 3D Geometry
+
+### Qwen 3.5
 
 ```bash
 cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
@@ -307,6 +326,39 @@ EVAL_RUN=${TRAIN_RUN}_eval
 
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=dl3dv/qwen3.5-4b \
+  job_name="$EVAL_RUN" \
+  data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
+  data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
+  feat_postfix=_layer32 \
+  trainer.devices=1 \
+  train=false \
+  test=true \
+  autoresume=false \
+  +model.skip_test_viz=true \
+  ckpt_path="$ROOT/$TRAIN_RUN/checkpoints/last.ckpt"
+```
+
+### VGGT-Omega
+
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/vggt-omega \
+  job_name="Layer24" \
+  data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
+  data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
+  feat_postfix=_layer24 \
+  trainer.devices=2
+
+# Evaluation
+ROOT=/project/peilab/jys/probing/DL3DV/vggt-omega
+export PROBING_DATA=/project/peilab/jys/probing_data
+TRAIN_RUN=Layer32
+EVAL_RUN=${TRAIN_RUN}_eval
+
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/vggt-omega \
   job_name="$EVAL_RUN" \
   data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
   data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
