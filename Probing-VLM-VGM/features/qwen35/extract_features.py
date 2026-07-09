@@ -26,7 +26,7 @@ def main(argv: List[str] | None = None) -> None:
     run_qwen_extraction(
         argv,
         extractor_factory=get_qwen35_extractor,
-        model_types=("qwen35", "qwen35-visual"),
+        model_types=("qwen35", "qwen35-visual", "spatialstack-qwen35"),
         default_model_type="qwen35",
         model_family="Qwen3.5",
         default_layers=(8, 16, 24, 32),

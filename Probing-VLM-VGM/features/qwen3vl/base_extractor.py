@@ -144,12 +144,8 @@ class BaseQwen3VLExtractor(ABC):
         logger.info(f"Attention implementation: {self.attn_implementation}")
         
         # Load model
-        self.model = self.model_class.from_pretrained(
+        self.model = self._load_model(
             model_path,
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation,
-            device_map=None,
-            low_cpu_mem_usage=False,
         ).eval().to(self.device)
         
         # Load processor
@@ -172,6 +168,15 @@ class BaseQwen3VLExtractor(ABC):
         
         logger.info(f"Model loaded. Hidden size: {self.hidden_size}, Layers: {self.num_layers}")
         logger.info(f"Extracting layers: {select_layers}")
+
+    def _load_model(self, model_path: str):
+        return self.model_class.from_pretrained(
+            model_path,
+            torch_dtype=self.torch_dtype,
+            attn_implementation=self.attn_implementation,
+            device_map=None,
+            low_cpu_mem_usage=False,
+        )
     
     def load_frames(
         self,
@@ -501,6 +506,8 @@ def get_qwen3vl_extractor(
     device: str = "cuda:0",
     target_size: Optional[Tuple[int, int]] = (960, 540),
     attn_implementation: str = "sdpa",
+    geometry_encoder_path: Optional[str] = None,
+    geometry_encoder_type: Optional[str] = None,
 ) -> BaseQwen3VLExtractor:
     """
     Get a cached Qwen3-VL extractor instance.
@@ -517,6 +524,8 @@ def get_qwen3vl_extractor(
     Returns:
         The extractor instance
     """
+    del geometry_encoder_path, geometry_encoder_type
+
     from .qwen3vl_extractor import Qwen3VLExtractor
     from .sensenova_extractor import SenseNovaQwen3VLExtractor
     

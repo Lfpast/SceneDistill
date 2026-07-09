@@ -175,6 +175,7 @@ class VideoProbeDataset(EasyDataset):
         "qwen3-vl-2b",
         "qwen3-vl-4b",
         "qwen3.5-4b",
+        "spatialstack",
         "qwen3.5-4b-visual",
         "vggt-omega",
         "qwen3-vl-8b-sensenova",

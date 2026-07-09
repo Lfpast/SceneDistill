@@ -132,6 +132,16 @@ def parse_args(
              "flash-attn is compatible with the system glibc/CUDA/PyTorch.",
     )
     parser.add_argument(
+        "--geometry-encoder-path",
+        default=None,
+        help="Optional SpatialStack geometry encoder checkpoint path.",
+    )
+    parser.add_argument(
+        "--geometry-encoder-type",
+        default=None,
+        help="Optional SpatialStack geometry encoder type, e.g. vggt_omega.",
+    )
+    parser.add_argument(
         "--target-size",
         nargs=2,
         type=int,
@@ -259,6 +269,8 @@ def main(
         device=args.device,
         target_size=target_size,
         attn_implementation=args.attn_implementation,
+        geometry_encoder_path=args.geometry_encoder_path,
+        geometry_encoder_type=args.geometry_encoder_type,
     )
     
     # Extract features

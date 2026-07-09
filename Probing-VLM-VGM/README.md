@@ -224,6 +224,23 @@ python -m features.run_dl3dv \
   --query-idx-divisor 4 \
   --output-layers 1 5 9 13 17 21 24
 
+# DL3DV SpatialStack features: Qwen3.5 LLM layers with VGGT-Omega injection active.
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name spatialstack \
+  --subset all \
+  --dl3dv-root data/DL3DV/DL3DV-ALL-960P \
+  --processed-root data/DL3DV/DL3DV-processed \
+  --out-root data/DL3DV/FEAT \
+  --model-path /path/to/SpatialStack-Qwen3.5-4B \
+  --model-type spatialstack-qwen35 \
+  --geometry-encoder-path /path/to/vggt_omega_1b_512.pt \
+  --geometry-encoder-type vggt_omega \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1 5 9 13 17 21 25 29 32
+
 # DL3DV VGM features: VGGT-Omega, 1-based layer sweep.
 python -m features.run_dl3dv \
   --vfm vggt_omega \
@@ -424,6 +441,15 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer17 \
   trainer.devices=2
 
+# SpatialStack-Qwen3.5-4B single-layer 3D probe.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/spatialstack \
+  job_name=spatialstack_layer17_seed42 \
+  data.data_root=/path/to/DL3DV/DL3DV-processed \
+  data.feat_root=/path/to/DL3DV/FEAT \
+  feat_postfix=_layer17 \
+  trainer.devices=2
+
 # VGGT-Omega single-layer 3D probe. Override feat_postfix for the layer sweep.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/vggt-omega \
@@ -470,6 +496,16 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
   --views 4 \
   --vfm qwen3.5-4b-visual \
   --task-name dl3dv-eval-qwen35-visual \
+  --project 3D-Geometry \
+  --skip-done
+
+# SpatialStack-Qwen3.5-4B probes use a custom run root.
+CUDA_VISIBLE_DEVICES=0 bash scripts/eval_dl3dv.sh \
+  --runs-dir /project/peilab/jys/probing/DL3DV/spatialstack \
+  --job-suffix _eval \
+  --views 4 \
+  --vfm spatialstack \
+  --task-name dl3dv-eval-spatialstack \
   --project 3D-Geometry \
   --skip-done
 
