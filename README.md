@@ -285,7 +285,7 @@ python -m features.run_dl3dv \
 ### VGGT-Omega
 ```bash
 export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
-CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
+python -m features.run_dl3dv \
   --vfm vggt_omega \
   --vfm-name vggt-omega \
   --subset all \
@@ -297,6 +297,28 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 24
+```
+
+### SpatialStack
+```bash
+export SPATIALSTACK_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Journey9ni--SpatialStack-Qwen3.5-4B/snapshots/777b2289252f7c78628e0f8ac63ffddf50fe7f7b
+export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
+
+python -m features.run_dl3dv \
+  --vfm qwen35 \
+  --vfm-name spatialstack \
+  --subset all \
+  --dl3dv-root "$PROBING_DATA/DL3DV/DL3DV-ALL-960P" \
+  --processed-root "$PROBING_DATA/DL3DV/DL3DV-processed" \
+  --out-root "$PROBING_DATA/DL3DV/FEAT" \
+  --model-path "$SPATIALSTACK_PATH" \
+  --model-type spatialstack-qwen35 \
+  --geometry-encoder-path "$VGGT_OMEGA_PATH" \
+  --geometry-encoder-type vggt_omega \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1
 ```
 
 ## 3D Geometry
@@ -370,3 +392,4 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   +model.skip_test_viz=true \
   ckpt_path="$ROOT/$TRAIN_RUN/checkpoints/last.ckpt"
 ```
+
