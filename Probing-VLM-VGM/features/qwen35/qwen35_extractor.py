@@ -76,6 +76,11 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
             setattr(config, "geometry_encoder_path", geometry_encoder_path)
         if geometry_encoder_type is not None:
             setattr(config, "geometry_encoder_type", geometry_encoder_type)
+        if getattr(config, "geometry_encoder_path", None) is None:
+            raise ValueError(
+                "spatialstack-qwen35 requires --geometry-encoder-path; "
+                "without it the geometry encoder weights are not loaded."
+            )
         if getattr(config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha":
             raise ValueError(
                 "spatialstack-qwen35 extraction currently supports the Phase-1 "
@@ -88,6 +93,7 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
 
         self.model_class = Qwen3_5ForConditionalGenerationWithGeometry
         self._spatialstack_config = config
+        self.geometry_encoder_path = getattr(config, "geometry_encoder_path", None)
         self.geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
         super().__init__(model_path, select_layers, question, **kwargs)
         self._optimize_spatialstack_geometry_encoder_cache()
@@ -98,6 +104,7 @@ class SpatialStackQwen35Extractor(Qwen3VLExtractor):
             config=self._spatialstack_config,
             torch_dtype=self.torch_dtype,
             attn_implementation=self.attn_implementation,
+            geometry_encoder_path=self.geometry_encoder_path,
             device_map=None,
             low_cpu_mem_usage=False,
         )

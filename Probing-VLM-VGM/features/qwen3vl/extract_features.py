@@ -301,9 +301,32 @@ def main(
     saved = 0
     for layer, feat in features.items():
         out_path = os.path.join(args.out_dir, f"feature_layer{layer}.sft")
+
+        if not torch.isfinite(feat).all().item():
+            finite = torch.isfinite(feat)
+            finite_ratio = finite.float().mean().item()
+            nan_count = torch.isnan(feat).sum().item()
+            posinf_count = torch.isposinf(feat).sum().item()
+            neginf_count = torch.isneginf(feat).sum().item()
+            raise FloatingPointError(
+                f"Non-finite features for layer {layer} before saving {out_path}: "
+                f"finite_ratio={finite_ratio:.6e}, nan={nan_count}, "
+                f"posinf={posinf_count}, neginf={neginf_count}"
+            )
         
         # Convert to half precision for storage
         feat_half = feat.half().cpu()
+        if not torch.isfinite(feat_half).all().item():
+            finite = torch.isfinite(feat_half)
+            finite_ratio = finite.float().mean().item()
+            nan_count = torch.isnan(feat_half).sum().item()
+            posinf_count = torch.isposinf(feat_half).sum().item()
+            neginf_count = torch.isneginf(feat_half).sum().item()
+            raise FloatingPointError(
+                f"Non-finite features for layer {layer} after fp16 conversion "
+                f"before saving {out_path}: finite_ratio={finite_ratio:.6e}, "
+                f"nan={nan_count}, posinf={posinf_count}, neginf={neginf_count}"
+            )
         
         logger.info(
             f"Saving layer {layer}: shape {tuple(feat_half.shape)} -> {out_path}"

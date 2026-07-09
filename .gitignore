@@ -8,3 +8,4 @@ slurm_logs/
 train.sbatch
 eval.sh
 output/
+extract.sbatch

@@ -318,7 +318,7 @@ python -m features.run_dl3dv \
   --use-query-frame-indices \
   --context-len 76 \
   --query-idx-divisor 4 \
-  --output-layers 1
+  --output-layers 32
 ```
 
 ## 3D Geometry
@@ -371,7 +371,9 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
   data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
   feat_postfix=_layer24 \
-  trainer.devices=2
+  trainer.devices=2 \
+  trainer.max_epochs=60 \
+  callbacks.model_checkpoint.save_top_k=0
 
 # Evaluation
 ROOT=/project/peilab/jys/probing/DL3DV/vggt-omega
@@ -393,3 +395,17 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   ckpt_path="$ROOT/$TRAIN_RUN/checkpoints/last.ckpt"
 ```
 
+### SpatialStack
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/spatialstack \
+  job_name=Layer1 \
+  data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
+  data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
+  feat_postfix=_layer1 \
+  trainer.devices=2 \
+  trainer.max_epochs=60 \
+  callbacks.model_checkpoint.save_top_k=0
+```
