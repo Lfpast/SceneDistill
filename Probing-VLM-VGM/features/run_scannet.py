@@ -36,6 +36,20 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
         --context-len 76 \
         --query-idx-divisor 4 \
         --output-layers 22
+
+Qwen3.5-4B, normalized-depth baseline layer 20:
+CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+        --vfm qwen35 \
+        --vfm-name qwen3.5-4b \
+        --split both \
+        --scannet-root data/ScanNet/ScanNet-processed \
+        --out-root data/ScanNet/FEAT \
+        --model-path Qwen/Qwen3.5-4B \
+        --model-type qwen35 \
+        --use-query-frame-indices \
+        --context-len 76 \
+        --query-idx-divisor 4 \
+        --output-layers 20
 """
 import argparse
 import importlib
@@ -129,7 +143,7 @@ def main():
         default="wan",
         choices=[
             "wan", "opensora", "cogvideox", "aether",
-            "internvl", "qwen3vl", "qwen25vl",
+            "internvl", "qwen3vl", "qwen25vl", "qwen35",
         ],
         help="Which extractor module to invoke.",
     )

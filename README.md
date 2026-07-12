@@ -249,6 +249,7 @@ python download-scannet.py -o "$PROBING_DATA/ScanNet"
 
 ### Qwen 3.5
 
+**DL3DV**:
 ```bash
 export PROBING_DATA=/project/peilab/jys/probing_data
 python -m features.run_dl3dv \
@@ -280,6 +281,26 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 24
+```
+
+**ScanNet**
+```bash
+cd /home/dduab/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+export SCANNET_ROOT=/project/peilab/jys/probing_data/ScanNet
+export QWEN35_PATH=Qwen/Qwen3.5-4B
+
+CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b \
+  --split both \
+  --scannet-root "$SCANNET_ROOT/ScanNet-processed" \
+  --out-root "$SCANNET_ROOT/FEAT" \
+  --model-path "$QWEN35_PATH" \
+  --model-type qwen35 \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 20
 ```
 
 ### VGGT-Omega

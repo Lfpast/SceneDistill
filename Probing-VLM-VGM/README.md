@@ -288,6 +288,20 @@ python -m features.run_scannet \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 22
+
+# ScanNet VLM features: Qwen3.5-4B, layer 20.
+python -m features.run_scannet \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b \
+  --split both \
+  --scannet-root data/ScanNet/ScanNet-processed \
+  --out-root data/ScanNet/FEAT \
+  --model-path Qwen/Qwen3.5-4B \
+  --model-type qwen35 \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 20
 ```
 
 Different feature extractors may require different checkpoint paths, input resolutions, or layer/timestep choices. See the docstring at the top of each `features/*/extract_features.py` file for model-specific examples.
@@ -315,6 +329,13 @@ be built during ScanNet preprocessing.
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/qwen3-vl-8b \
   job_name=qwen3-vl-8b \
+  trainer.devices=1
+
+# Qwen3.5-4B semantic-tagging probe. Override feat_postfix for layer sweeps.
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/qwen3.5-4b \
+  job_name=qwen3.5-4b_layer20 \
+  feat_postfix=_layer20 \
   trainer.devices=1
 
 # WAN2.1-T2V-14B semantic-tagging probe.
@@ -366,6 +387,13 @@ at timestep 749.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/qwen3-vl-8b \
   job_name=qwen3-vl-8b \
+  trainer.devices=2
+
+# Qwen3.5-4B instance-grouping probe. Override feat_postfix for layer sweeps.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/qwen3.5-4b \
+  job_name=qwen3.5-4b_layer20 \
+  feat_postfix=_layer20 \
   trainer.devices=2
 
 # WAN2.1-T2V-14B instance-grouping probe.
