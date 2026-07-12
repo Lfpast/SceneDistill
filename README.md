@@ -285,9 +285,8 @@ python -m features.run_dl3dv \
 
 **ScanNet**
 ```bash
-cd /home/dduab/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
 export SCANNET_ROOT=/project/peilab/jys/probing_data/ScanNet
-export QWEN35_PATH=Qwen/Qwen3.5-4B
+export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
 
 CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
   --vfm qwen35 \
@@ -300,7 +299,7 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
   --use-query-frame-indices \
   --context-len 76 \
   --query-idx-divisor 4 \
-  --output-layers 20
+  --output-layers 1
 ```
 
 ### VGGT-Omega
