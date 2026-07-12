@@ -33,6 +33,8 @@ feat_postfix: _layer20
 vfm_channels: 1024
 
 data:
+  data_root: /project/peilab/jys/probing_data/ScanNet/ScanNet-processed
+  feat_root: /project/peilab/jys/probing_data/ScanNet/FEAT
   data_module:
     train_datasets:
       - ScanNetTaggingDataset(root='${data.data_root}', root_vfm='${data.feat_root}', split='train', vfm_name='${vfm_name}', feat_postfix='${feat_postfix}', feat_pixalign=True, num_views=${gt_num_frames}, min_view_interval=5, context_len=76, query_idx_divisor=4, target_spatial_size=${target_spatial_size}, num_classes=${num_classes}, min_pixels_per_video=200, min_frames_present=1)
@@ -52,8 +54,11 @@ logger:
     tags: [qwen3.5-4b-visual, visual-encoder, "${feat_postfix}"]
 
 model:
+  data_root: ${data.data_root}
+  train_pos_rate_path: ${data.data_root}/train_pos_rate_${num_classes}.npy
   probe:
     video_channels: ${vfm_channels}
+    clip_init_path: /project/peilab/jys/probing_data/ScanNet/clip_class_embeds_${num_classes}_vitl14.npy
 
 trainer:
   devices: auto
