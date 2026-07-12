@@ -15,8 +15,7 @@
 #   - Forces trainer=local so eval runs interactively regardless of how the
 #     ckpt was trained (a SLURM-trained run's overrides.yaml may carry
 #     trainer=ddp, which would crash an interactive eval on KeyError SLURM_*).
-#   - Switches task_name to scannet-tagging-eval so outputs land in
-#     logs/scannet-tagging-eval/.
+#   - Writes eval outputs into each training run's eval/ subdirectory.
 #   - Loads checkpoints/best.ckpt (highest val/mAP — written by the tagging
 #     callbacks preset). Falls back to last.ckpt with a warning for runs that
 #     predate the static filename or crashed before the first validation.
@@ -47,6 +46,9 @@
 #   # Only one VFM family (matches by run-name token, so `--vfm qwen3-vl-8b`
 #   # covers both the plain and sensenova variants). Pass --vfm repeatedly.
 #   bash scripts/eval_scannet_tagging.sh --views 8 --vfm wan-t2v-1.3b
+#
+#   # Evaluate runs stored outside the default repo-local logs directory.
+#   bash scripts/eval_scannet_tagging.sh --views 8 --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/semantic-tagging --vfm qwen3.5-4b
 #
 #   # Route all eval runs to a separate wandb project.
 #   bash scripts/eval_scannet_tagging.sh --views 8 --gpus "0,1" --project VLM-VG-3D-TaggingEval
@@ -98,6 +100,7 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=1; shift ;;
     --done-dir) DONE_DIR="$2"; shift 2 ;;
     --video-tss) VIDEO_TSS_LIST+=("$2"); shift 2 ;;
+    --runs-dir) RUNS_DIR="$2"; shift 2 ;;
     --run-name) RUN_NAME_LIST+=("$2"); shift 2 ;;
     --vfm) VFM_LIST+=("$2"); shift 2 ;;
     --gpus) GPUS="$2"; shift 2 ;;
@@ -404,7 +407,7 @@ for RUN_DIR in "${RUN_DIRS[@]}"; do
     "batch_size=${BS}"
     "trainer=local"
     "trainer.devices=1"
-    "task_name=scannet-tagging-eval"
+    "hydra.run.dir=${RUN_DIR}/eval"
     "train=false"
     "test=true"
     "autoresume=false"
@@ -476,6 +479,4 @@ if [[ -n "$GPUS" ]]; then
 fi
 
 echo
-echo "Done. Aggregate with:"
-echo "  python scripts/parse_results.py --groups scannet-tagging-eval \\"
-echo "      --metrics 'val/mAP,val/AP_head,val/AP_mid,val/AP_tail,val/OF1,val/CF1'"
+echo "Done. Eval outputs were written under each selected run's eval/ subdirectory."

@@ -42,7 +42,7 @@ class VFMFeatureLoaderMixin:
     SUPPORTED_VFMS: Tuple[str, ...] = (
         "wan-t2v-1.3b", "wan-t2v-14b", "wan-i2v-14b", "opensora",
         "internvl3-1b", "internvl3-2b", "internvl3-8b", "internvl3.5-4b", "internvl3.5-8b", "internvl3-8b-sensenova",
-        "qwen3-vl-8b", "qwen3-vl-8b-sensenova", "qwen3-vl-4b", "qwen3-vl-2b", "qwen3.5-4b",
+        "qwen3-vl-8b", "qwen3-vl-8b-sensenova", "qwen3-vl-4b", "qwen3-vl-2b", "qwen3.5-4b", "qwen3.5-4b-visual",
         "qwen2.5-vl-7b", "qwen2.5-vl-3b", "videollama3-7b", "videollama3-2b",
         "llavaov15-4b", "llavaov15-8b", "mimo-vl-7b",
         "wan-t2v-14b-qwen3-vl-8b-concat", "wan-t2v-14b-qwen3-vl-8b-lnconcat",
@@ -108,7 +108,7 @@ class VFMFeatureLoaderMixin:
 
         elif self.vfm_name in (
             "internvl3-1b", "internvl3-2b", "internvl3-8b", "internvl3.5-4b", "internvl3.5-8b", "internvl3-8b-sensenova",
-            "qwen3-vl-8b", "qwen3-vl-8b-sensenova", "qwen3-vl-4b", "qwen3-vl-2b", "qwen3.5-4b",
+            "qwen3-vl-8b", "qwen3-vl-8b-sensenova", "qwen3-vl-4b", "qwen3-vl-2b", "qwen3.5-4b", "qwen3.5-4b-visual",
             "qwen2.5-vl-7b", "qwen2.5-vl-3b", "videollama3-7b", "videollama3-2b",
             "llavaov15-4b", "llavaov15-8b", "mimo-vl-7b",
             "wan-t2v-14b-qwen3-vl-8b-concat", "wan-t2v-14b-qwen3-vl-8b-lnconcat",

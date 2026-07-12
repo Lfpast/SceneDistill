@@ -5,11 +5,11 @@ defaults:
   - override /model: probe_tagging
   - override /callbacks: tagging
 
-# Qwen3.5-4B LLM hidden-state features at visual-token positions.
-# Features live at <feat_root>/qwen3.5-4b/<split>/<scene>/feature_layerN.sft.
+# Qwen3.5-4B visual-encoder hidden states.
+# Features live at <feat_root>/qwen3.5-4b-visual/<split>/<scene>/feature_layerN.sft.
 
 seed: 42
-tags: ["train", "scannet", "semantic-tagging"]
+tags: ["train", "scannet", "semantic-tagging", "visual-encoder"]
 task_name: semantic-tagging
 job_name: default
 autoresume: true
@@ -21,16 +21,16 @@ num_classes: 20
 target_spatial_size: null
 
 paths:
-  log_dir: /project/peilab/jys/probing/ScanNet/qwen3.5-4b
+  log_dir: /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual
   run_folder_name: ${task_name}/${job_name}
 
 hydra:
   run:
     dir: ${paths.log_dir}/${paths.run_folder_name}
 
-vfm_name: qwen3.5-4b
+vfm_name: qwen3.5-4b-visual
 feat_postfix: _layer20
-vfm_channels: 2560
+vfm_channels: 1024
 
 data:
   data_module:
@@ -48,8 +48,8 @@ logger:
     entity: yjiaag-hkust
     project: Semantic-Tagging
     name: ${job_name}
-    group: qwen3.5-4b
-    tags: [qwen3.5-4b, "${feat_postfix}"]
+    group: qwen3.5-4b-visual
+    tags: [qwen3.5-4b-visual, visual-encoder, "${feat_postfix}"]
 
 model:
   probe:

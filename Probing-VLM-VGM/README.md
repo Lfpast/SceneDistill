@@ -338,6 +338,13 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   feat_postfix=_layer20 \
   trainer.devices=1
 
+# Qwen3.5-4B visual-encoder semantic-tagging probe.
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/qwen3.5-4b-visual \
+  job_name=qwen3.5-4b-visual_layer20 \
+  feat_postfix=_layer20 \
+  trainer.devices=1
+
 # WAN2.1-T2V-14B semantic-tagging probe.
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/wan-t2v-14b \
@@ -351,6 +358,20 @@ The resulting checkpoints are saved under:
 logs/scannet-tagging/runs/
   vlm_scannet-tagging_qwen3-vl-8b/
   vg_scannet-tagging_wan-t2v-14b/
+
+# Qwen3.5 configs use project storage by default:
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b/
+  semantic-tagging/
+    qwen3.5-4b_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
+  semantic-tagging/
+    qwen3.5-4b-visual_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
 ```
 
 Evaluate the trained semantic-tagging probes:
@@ -362,17 +383,24 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --vfm qwen3-vl-8b \
   --vfm wan-t2v-14b \
   --skip-done
+
+# Qwen3.5 custom-root example.
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/semantic-tagging \
+  --vfm qwen3.5-4b \
+  --skip-done
 ```
 
-Evaluation writes new runs to `logs/scannet-tagging-eval/runs/`. The main
-semantic-tagging metrics can then be exported as a CSV:
+Evaluation writes into each selected training run's `eval/` subdirectory. For
+the Qwen3.5 custom-root configs above, a layer run and its eval output look like:
 
-```bash
-python scripts/parse_results.py \
-  --groups scannet-tagging-eval \
-  --runs "vlm_scannet-tagging-eval_qwen3-vl-8b;vg_scannet-tagging-eval_wan-t2v-14b" \
-  --metrics "val/AP_mid,val/mAP,val/Mid_Ratio" \
-  --joint-name scannet-tagging-main
+```text
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b/
+  semantic-tagging/
+    qwen3.5-4b_layer20/
+      checkpoints/
+      eval/
 ```
 
 ### Instance Grouping

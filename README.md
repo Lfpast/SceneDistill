@@ -448,3 +448,15 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   +model.skip_test_viz=true \
   ckpt_path="$ROOT/$TRAIN_RUN/checkpoints/last.ckpt"
 ```
+
+## Semantic Tagging
+
+### Qwen 3.5
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/qwen3.5-4b \
+  job_name=Layer1 \
+  feat_postfix=_layer1 \
+  trainer.devices=1
