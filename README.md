@@ -429,4 +429,23 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   trainer.devices=2 \
   trainer.max_epochs=60 \
   callbacks.model_checkpoint.save_top_k=0
+
+# Evaluation
+ROOT=/project/peilab/jys/probing/DL3DV
+export PROBING_DATA=/project/peilab/jys/probing_data
+TRAIN_RUN=Layer32
+EVAL_RUN=${TRAIN_RUN}_eval
+
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=dl3dv/spatialstack \
+  job_name="$EVAL_RUN" \
+  data.data_root="$PROBING_DATA/DL3DV/DL3DV-processed" \
+  data.feat_root="$PROBING_DATA/DL3DV/FEAT" \
+  feat_postfix=_layer32 \
+  trainer.devices=1 \
+  train=false \
+  test=true \
+  autoresume=false \
+  +model.skip_test_viz=true \
+  ckpt_path="$ROOT/$TRAIN_RUN/checkpoints/last.ckpt"
 ```
