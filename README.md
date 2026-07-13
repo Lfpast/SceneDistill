@@ -460,3 +460,12 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   job_name=Layer1 \
   feat_postfix=_layer1 \
   trainer.devices=1
+
+# Evaluate
+CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/semantic-tagging \
+  --run-name Layer1 \
+  --vfm qwen3.5-4b \
+  --skip-done
+```
