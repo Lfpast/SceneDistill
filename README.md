@@ -287,8 +287,7 @@ python -m features.run_dl3dv \
 ```bash
 export SCANNET_ROOT=/project/peilab/jys/probing_data/ScanNet
 export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
-
-CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+python -m features.run_scannet \
   --vfm qwen35 \
   --vfm-name qwen3.5-4b \
   --split both \
@@ -300,9 +299,25 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 1
+
+  # Visual Encoder
+export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+python -m features.run_scannet \
+  --vfm qwen35 \
+  --vfm-name qwen3.5-4b-visual \
+  --split both \
+  --scannet-root "$SCANNET_ROOT/ScanNet-processed" \
+  --out-root "$SCANNET_ROOT/FEAT" \
+  --model-path "$QWEN35_PATH" \
+  --model-type qwen35-visual \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1
 ```
 
 ### VGGT-Omega
+**DL3DV**
 ```bash
 export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
 python -m features.run_dl3dv \
