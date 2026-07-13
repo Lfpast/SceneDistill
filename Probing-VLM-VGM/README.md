@@ -444,6 +444,14 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer20 \
   trainer.devices=2
 
+# Qwen3.5-4B visual-encoder instance-grouping probe.
+# This config writes to /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/instance-grouping/<job_name>.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/qwen3.5-4b-visual \
+  job_name=Layer1 \
+  feat_postfix=_layer1 \
+  trainer.devices=2
+
 # WAN2.1-T2V-14B instance-grouping probe.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/wan-t2v-14b \
@@ -461,6 +469,12 @@ logs/scannet-instance/runs/
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b/
   instance-grouping/
     qwen3.5-4b_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
+  instance-grouping/
+    Layer1/
       checkpoints/
       wandb/
       .hydra/
@@ -491,10 +505,29 @@ subdirectory so offline W&B runs also leave local JSON metrics:
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
+  --run-name qwen3.5-4b_layer20 \
   --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
   --eval-in-run-dir \
   --gpus 0,1 \
   --vfm qwen3.5-4b \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+```
+
+For Qwen3.5-4B visual-encoder instance-grouping runs, use the same eval
+shape with the visual model root and exact `job_name`:
+
+```bash
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/instance-grouping \
+  --run-name Layer1 \
+  --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm qwen3.5-4b-visual \
   --project Instance-Grouping \
   --hdbscan-workers 8 \
   --num-workers 2 \
@@ -507,6 +540,13 @@ This writes:
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b/
   instance-grouping/
     qwen3.5-4b_layer20/
+      eval/
+        metrics.json
+        timings.json
+        per_scene_metrics.jsonl
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
+  instance-grouping/
+    Layer1/
       eval/
         metrics.json
         timings.json
