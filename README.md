@@ -493,8 +493,8 @@ cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/qwen3.5-4b-visual \
-  job_name=Layer1 \
-  feat_postfix=_layer1 \
+  job_name=Layer16 \
+  feat_postfix=_layer16 \
   trainer.devices=1 \
   callbacks.model_checkpoint.save_top_k=0
 
@@ -502,7 +502,6 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/semantic-tagging \
-  --run-name qwen3.5-4b-visual_layer20 \
   --vfm qwen3.5-4b-visual \
   --skip-done
 ```
