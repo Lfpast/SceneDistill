@@ -398,21 +398,38 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --vfm wan-t2v-14b \
   --skip-done
 
-# Qwen3.5 custom-root example.
+# Qwen3.5-4B single-run custom-root example.
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/semantic-tagging \
+  --run-name qwen3.5-4b_layer20 \
   --vfm qwen3.5-4b \
+  --project Semantic-Tagging \
+  --skip-done
+
+# Qwen3.5-4B visual-encoder single-run custom-root example.
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/semantic-tagging \
+  --run-name qwen3.5-4b-visual_layer20 \
+  --vfm qwen3.5-4b-visual \
+  --project Semantic-Tagging \
   --skip-done
 ```
 
 Evaluation writes into each selected training run's `eval/` subdirectory. For
-the Qwen3.5 custom-root configs above, a layer run and its eval output look like:
+the Qwen3.5 custom-root configs above, layer runs and their eval outputs look like:
 
 ```text
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b/
   semantic-tagging/
     qwen3.5-4b_layer20/
+      checkpoints/
+      eval/
+        metrics.json
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
+  semantic-tagging/
+    qwen3.5-4b-visual_layer20/
       checkpoints/
       eval/
         metrics.json
