@@ -470,3 +470,30 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --vfm qwen3.5-4b \
   --skip-done
 ```
+
+
+## Instance Grouping
+
+### Qwen 3.5
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/qwen3.5-4b \
+  job_name=qwen3.5-4b_layer20 \
+  feat_postfix=_layer20 \
+  trainer.devices=2
+
+# Evaluation
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
+  --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm qwen3.5-4b \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+```
