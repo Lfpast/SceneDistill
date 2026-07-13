@@ -9,23 +9,31 @@ defaults:
 # Features live at <feat_root>/qwen3.5-4b/<split>/<scene>/feature_layerN.sft.
 
 seed: 42
-tags: ["train", "scannet", "instance-probe"]
-task_name: scannet-instance
+tags: ["train", "scannet", "instance-grouping"]
+task_name: instance-grouping
 job_name: default
 autoresume: true
+enable_train_logger: true
 
 gt_num_frames: 8
 batch_size: 8
 target_spatial_size: null
 
 paths:
-  run_folder_name: vlm_${task_name}_${job_name}
+  log_dir: /project/peilab/jys/probing/ScanNet/qwen3.5-4b
+  run_folder_name: ${task_name}/${job_name}
+
+hydra:
+  run:
+    dir: ${paths.log_dir}/${paths.run_folder_name}
 
 vfm_name: qwen3.5-4b
 feat_postfix: _layer20
 vfm_channels: 2560
 
 data:
+  data_root: /project/peilab/jys/probing_data/ScanNet/ScanNet-processed
+  feat_root: /project/peilab/jys/probing_data/ScanNet/FEAT
   data_module:
     train_datasets:
       - ScanNetInstanceDataset(root='${data.data_root}', root_vfm='${data.feat_root}', split='train', vfm_name='${vfm_name}', feat_postfix='${feat_postfix}', feat_pixalign=True, num_views=${gt_num_frames}, min_view_interval=5, context_len=76, query_idx_divisor=4, target_spatial_size=${target_spatial_size})
@@ -38,8 +46,11 @@ data:
 
 logger:
   wandb:
-    name: vlm_${task_name}_${job_name}
-    group: ${task_name}
+    entity: yjiaag-hkust
+    project: Instance-Grouping
+    name: ${job_name}
+    group: qwen3.5-4b
+    tags: [qwen3.5-4b, "${feat_postfix}"]
 
 model:
   probe:

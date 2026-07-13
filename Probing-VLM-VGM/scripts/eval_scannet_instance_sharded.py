@@ -143,7 +143,16 @@ def _select_checkpoint(run_dir: Path) -> Optional[Path]:
 
 
 def _eval_run_name(train_run_name: str) -> str:
-    return train_run_name.replace("scannet-instance", "scannet-instance-eval", 1)
+    eval_name = train_run_name.replace("scannet-instance", "scannet-instance-eval", 1)
+    if eval_name == train_run_name:
+        eval_name = f"{train_run_name}_eval"
+    return eval_name
+
+
+def _eval_output_dir(args: argparse.Namespace, run_dir: Path, eval_run_name: str) -> Path:
+    if getattr(args, "eval_in_run_dir", False):
+        return run_dir / "eval"
+    return Path(args.output_root) / "runs" / eval_run_name
 
 
 def _load_run_cfg(run_dir: Path):
@@ -225,8 +234,15 @@ def collect_runs(args: argparse.Namespace) -> List[Dict[str, Any]]:
                 skipped_tss.append(run_name)
                 continue
 
+        eval_run_name = _eval_run_name(run_name)
+        output_dir = _eval_output_dir(args, run_dir, eval_run_name)
         done_path = Path(args.done_dir) / f"{run_name}.done"
-        if args.skip_done and not args.force and done_path.is_file():
+        if (
+            args.skip_done
+            and not args.force
+            and done_path.is_file()
+            and (output_dir / "metrics.json").is_file()
+        ):
             skipped_done.append(run_name)
             continue
 
@@ -239,7 +255,7 @@ def collect_runs(args: argparse.Namespace) -> List[Dict[str, Any]]:
             {
                 "run_dir": str(run_dir),
                 "run_name": run_name,
-                "eval_run_name": _eval_run_name(run_name),
+                "eval_run_name": eval_run_name,
                 "ckpt_path": str(ckpt),
                 "batch_size": batch_size,
                 "target_spatial_size": target_spatial_size,
@@ -831,7 +847,7 @@ def evaluate_one_run(args: argparse.Namespace, run_info: Dict[str, Any]) -> Dict
     t_run = time.perf_counter()
     run_dir = Path(run_info["run_dir"])
     cfg = _load_run_cfg(run_dir)
-    output_dir = Path(args.output_root) / "runs" / run_info["eval_run_name"]
+    output_dir = _eval_output_dir(args, run_dir, run_info["eval_run_name"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
     target_spatial_size = run_info["target_spatial_size"]
@@ -1141,10 +1157,27 @@ def log_to_wandb(
     import wandb
 
     project = args.project or str(cfg.logger.wandb.project)
+    entity = OmegaConf.select(cfg, "logger.wandb.entity")
+    group = str(OmegaConf.select(cfg, "logger.wandb.group") or "scannet-instance-eval")
+    tags_conf = OmegaConf.select(cfg, "logger.wandb.tags")
+    tags = []
+    if tags_conf is not None:
+        tags_obj = OmegaConf.to_container(tags_conf, resolve=True)
+        if isinstance(tags_obj, list):
+            tags = [str(tag) for tag in tags_obj]
+        else:
+            tags = [str(tags_obj)]
+    if "eval" not in tags:
+        tags.append("eval")
+    init_kwargs = {}
+    if entity:
+        init_kwargs["entity"] = str(entity)
+
     run = wandb.init(
         project=project,
         name=run_info["eval_run_name"],
-        group="scannet-instance-eval",
+        group=group,
+        tags=tags,
         dir=str(output_dir),
         config={
             "train_run_name": run_info["run_name"],
@@ -1153,6 +1186,7 @@ def log_to_wandb(
             "hdbscan_workers": args.hdbscan_workers,
             "sharded_eval": True,
         },
+        **init_kwargs,
     )
     try:
         wandb.log({**metrics, "runtime/total_sec": timings["total_sec"]})
@@ -1171,6 +1205,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--views", type=int, required=True)
     parser.add_argument("--runs-dir", default="logs/scannet-instance/runs")
     parser.add_argument("--output-root", default="logs/scannet-instance-eval-sharded")
+    parser.add_argument(
+        "--eval-in-run-dir",
+        action="store_true",
+        help="Write each run's eval artifacts under <run_dir>/eval instead of <output-root>/runs/<eval_run_name>.",
+    )
     parser.add_argument("--done-dir", default=None)
     parser.add_argument("--video-tss", action="append", default=[])
     parser.add_argument("--run-name", action="append", default=[], help="Exact run directory basename to evaluate. Pass multiple times.")

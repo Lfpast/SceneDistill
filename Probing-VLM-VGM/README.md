@@ -423,6 +423,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   trainer.devices=2
 
 # Qwen3.5-4B instance-grouping probe. Override feat_postfix for layer sweeps.
+# This config writes to /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping/<job_name>.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/qwen3.5-4b \
   job_name=qwen3.5-4b_layer20 \
@@ -442,6 +443,13 @@ The resulting checkpoints are saved under:
 logs/scannet-instance/runs/
   vlm_scannet-instance_qwen3-vl-8b/
   vg_scannet-instance_wan-t2v-14b/
+
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b/
+  instance-grouping/
+    qwen3.5-4b_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
 ```
 
 Evaluate the trained instance probes with sharded HDBSCAN clustering:
@@ -461,6 +469,35 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
 
 Evaluation writes new runs to `logs/scannet-instance-eval-sharded/runs/`. The
 main instance-grouping metrics can then be exported as a CSV:
+
+For Qwen3.5-4B layer sweeps, evaluate into each training run's fixed `eval/`
+subdirectory so offline W&B runs also leave local JSON metrics:
+
+```bash
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
+  --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm qwen3.5-4b \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+```
+
+This writes:
+
+```text
+/project/peilab/jys/probing/ScanNet/qwen3.5-4b/
+  instance-grouping/
+    qwen3.5-4b_layer20/
+      eval/
+        metrics.json
+        timings.json
+        per_scene_metrics.jsonl
+```
 
 ```bash
 python scripts/parse_results.py \
