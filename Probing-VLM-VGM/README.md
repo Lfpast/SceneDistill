@@ -401,7 +401,12 @@ the Qwen3.5 custom-root configs above, a layer run and its eval output look like
     qwen3.5-4b_layer20/
       checkpoints/
       eval/
+        metrics.json
 ```
+
+When `--skip-done` is set, runs are skipped only if both the done marker and
+`eval/metrics.json` exist. Older eval runs without `metrics.json` will be
+re-run and backfilled automatically.
 
 ### Instance Grouping
 

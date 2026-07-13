@@ -228,7 +228,7 @@ for d in "${CANDIDATE_DIRS[@]}"; do
     fi
   fi
 
-  if [[ $SKIP_DONE -eq 1 && $FORCE -eq 0 && -f "$(done_path_for "$RUN_NAME")" ]]; then
+  if [[ $SKIP_DONE -eq 1 && $FORCE -eq 0 && -f "$(done_path_for "$RUN_NAME")" && -f "$d/eval/metrics.json" ]]; then
     SKIPPED_DONE+=("$RUN_NAME")
     continue
   fi
@@ -412,6 +412,7 @@ for RUN_DIR in "${RUN_DIRS[@]}"; do
     "test=true"
     "autoresume=false"
     "ckpt_path='${CKPT}'"
+    "metrics_json_path=${RUN_DIR}/eval/metrics.json"
     "data.data_module.num_workers_val=4"
   )
 

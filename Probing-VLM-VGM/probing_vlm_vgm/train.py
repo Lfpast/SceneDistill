@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import signal  # noqa: F401
 import warnings
@@ -84,6 +85,54 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 def python_eval_resolver(code: str):
     return eval(code)
+
+
+def _jsonable_metric_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _jsonable_metric_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_metric_value(v) for v in value]
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numel"):
+        if value.numel() == 1:
+            return value.item()
+        return value.tolist()
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:  # noqa: BLE001
+            pass
+    return value
+
+
+def _write_metrics_json(metric_dict: Dict[str, Any], cfg: DictConfig) -> None:
+    metrics_json_path = cfg.get("metrics_json_path")
+    if not metrics_json_path or str(metrics_json_path) == "null":
+        return
+
+    metrics_json_path = str(metrics_json_path)
+    out_dir = os.path.dirname(metrics_json_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    payload = {
+        "metadata": {
+            "task_name": cfg.get("task_name"),
+            "job_name": cfg.get("job_name"),
+            "ckpt_path": cfg.get("ckpt_path"),
+            "output_dir": cfg.paths.output_dir,
+        },
+        "metrics": {
+            str(k): _jsonable_metric_value(v)
+            for k, v in sorted(metric_dict.items(), key=lambda item: str(item[0]))
+        },
+    }
+    with open(metrics_json_path, "w") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    log.info(f"Wrote metrics JSON: {metrics_json_path}")
 
 
 # Register the resolver with OmegaConf
@@ -220,7 +269,11 @@ def main(cfg: DictConfig) -> Optional[float]:
             log.info("No checkpoint found; starting from scratch.")
 
     # train the model
-    metric_dict, _ = train(cfg)
+    metric_dict, object_dict = train(cfg)
+
+    trainer = object_dict.get("trainer")
+    if getattr(trainer, "is_global_zero", True):
+        _write_metrics_json(metric_dict, cfg)
 
     # safely retrieve metric value for hydra-based hyperparameter optimization
     metric_value = get_metric_value(
