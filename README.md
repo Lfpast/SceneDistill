@@ -300,7 +300,8 @@ python -m features.run_scannet \
   --query-idx-divisor 4 \
   --output-layers 1
 
-  # Visual Encoder
+# Visual Encoder
+export SCANNET_ROOT=/project/peilab/jys/probing_data/ScanNet
 export QWEN35_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
 python -m features.run_scannet \
   --vfm qwen35 \
