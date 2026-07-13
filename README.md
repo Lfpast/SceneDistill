@@ -482,7 +482,8 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/qwen3.5-4b \
   job_name=qwen3.5-4b_layer20 \
   feat_postfix=_layer20 \
-  trainer.devices=2
+  trainer.devices=2 \
+  callbacks.model_checkpoint.save_top_k=0
 
 # Evaluation
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
