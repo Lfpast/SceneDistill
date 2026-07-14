@@ -507,6 +507,14 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer1 \
   trainer.devices=2
 
+# VGGT-Omega instance-grouping probe. Override feat_postfix for layer sweeps.
+# This config writes to /project/peilab/jys/probing/ScanNet/vggt-omega/instance-grouping/<job_name>.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/vggt-omega \
+  job_name=vggt-omega_layer24 \
+  feat_postfix=_layer24 \
+  trainer.devices=2
+
 # WAN2.1-T2V-14B instance-grouping probe.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/wan-t2v-14b \
@@ -530,6 +538,12 @@ logs/scannet-instance/runs/
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
   instance-grouping/
     Layer1/
+      checkpoints/
+      wandb/
+      .hydra/
+/project/peilab/jys/probing/ScanNet/vggt-omega/
+  instance-grouping/
+    vggt-omega_layer24/
       checkpoints/
       wandb/
       .hydra/
@@ -582,6 +596,19 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
   --eval-in-run-dir \
   --gpus 0,1 \
   --vfm qwen3.5-4b-visual \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+
+# VGGT-Omega batch custom-root example.
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/vggt-omega/instance-grouping \
+  --output-root /project/peilab/jys/probing/ScanNet/vggt-omega/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm vggt-omega \
   --project Instance-Grouping \
   --hdbscan-workers 8 \
   --num-workers 2 \
