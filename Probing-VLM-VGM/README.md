@@ -398,20 +398,18 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --vfm wan-t2v-14b \
   --skip-done
 
-# Qwen3.5-4B single-run custom-root example.
+# Qwen3.5-4B batch custom-root example.
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/semantic-tagging \
-  --run-name qwen3.5-4b_layer20 \
   --vfm qwen3.5-4b \
   --project Semantic-Tagging \
   --skip-done
 
-# Qwen3.5-4B visual-encoder single-run custom-root example.
+# Qwen3.5-4B visual-encoder batch custom-root example.
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/semantic-tagging \
-  --run-name qwen3.5-4b-visual_layer20 \
   --vfm qwen3.5-4b-visual \
   --project Semantic-Tagging \
   --skip-done
@@ -515,14 +513,14 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
 Evaluation writes new runs to `logs/scannet-instance-eval-sharded/runs/`. The
 main instance-grouping metrics can then be exported as a CSV:
 
-For Qwen3.5-4B layer sweeps, evaluate into each training run's fixed `eval/`
-subdirectory so offline W&B runs also leave local JSON metrics:
+For Qwen3.5-4B layer sweeps, batch-evaluate all matching runs under
+`--runs-dir` into each training run's fixed `eval/` subdirectory so offline
+W&B runs also leave local JSON metrics:
 
 ```bash
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
-  --run-name qwen3.5-4b_layer20 \
   --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b/instance-grouping \
   --eval-in-run-dir \
   --gpus 0,1 \
@@ -534,13 +532,12 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
 ```
 
 For Qwen3.5-4B visual-encoder instance-grouping runs, use the same eval
-shape with the visual model root and exact `job_name`:
+shape with the visual model root:
 
 ```bash
 WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/instance-grouping \
-  --run-name Layer1 \
   --output-root /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/instance-grouping \
   --eval-in-run-dir \
   --gpus 0,1 \
