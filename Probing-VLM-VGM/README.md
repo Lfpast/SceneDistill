@@ -372,6 +372,13 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   feat_postfix=_layer20 \
   trainer.devices=1
 
+# VGGT-Omega semantic-tagging probe. Override feat_postfix for layer sweeps.
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/vggt-omega \
+  job_name=vggt-omega_layer24 \
+  feat_postfix=_layer24 \
+  trainer.devices=1
+
 # WAN2.1-T2V-14B semantic-tagging probe.
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/wan-t2v-14b \
@@ -396,6 +403,12 @@ logs/scannet-tagging/runs/
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
   semantic-tagging/
     qwen3.5-4b-visual_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
+/project/peilab/jys/probing/ScanNet/vggt-omega/
+  semantic-tagging/
+    vggt-omega_layer24/
       checkpoints/
       wandb/
       .hydra/
@@ -426,10 +439,18 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --vfm qwen3.5-4b-visual \
   --project Semantic-Tagging \
   --skip-done
+
+# VGGT-Omega batch custom-root example.
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/vggt-omega/semantic-tagging \
+  --vfm vggt-omega \
+  --project Semantic-Tagging \
+  --skip-done
 ```
 
 Evaluation writes into each selected training run's `eval/` subdirectory. For
-the Qwen3.5 custom-root configs above, layer runs and their eval outputs look like:
+the custom-root configs above, layer runs and their eval outputs look like:
 
 ```text
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b/
@@ -441,6 +462,12 @@ the Qwen3.5 custom-root configs above, layer runs and their eval outputs look li
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
   semantic-tagging/
     qwen3.5-4b-visual_layer20/
+      checkpoints/
+      eval/
+        metrics.json
+/project/peilab/jys/probing/ScanNet/vggt-omega/
+  semantic-tagging/
+    vggt-omega_layer24/
       checkpoints/
       eval/
         metrics.json

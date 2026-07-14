@@ -523,6 +523,25 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --skip-done
 ```
 
+### VGGT-Omega
+```bash
+cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/vggt-omega \
+  job_name=Layer24 \
+  feat_postfix=_layer24 \
+  trainer.devices=1 \
+  callbacks.model_checkpoint.save_top_k=0
+
+# Evaluate
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/vggt-omega/semantic-tagging \
+  --vfm vggt-omega \
+  --skip-done
+```
+
 
 
 
