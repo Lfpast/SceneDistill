@@ -335,6 +335,23 @@ python -m features.run_dl3dv \
   --output-layers 24
 ```
 
+**ScanNet**
+```bash
+export SCANNET_ROOT=/project/peilab/jys/probing_data/ScanNet
+export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
+python -m features.run_scannet \
+  --vfm vggt_omega \
+  --vfm-name vggt-omega \
+  --split both \
+  --scannet-root "$SCANNET_ROOT/ScanNet-processed" \
+  --out-root "$SCANNET_ROOT/FEAT" \
+  --model-path "$VGGT_OMEGA_PATH" \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1 4 8 12 16 20 24
+```
+
 ### SpatialStack
 ```bash
 export SPATIALSTACK_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Journey9ni--SpatialStack-Qwen3.5-4B/snapshots/777b2289252f7c78628e0f8ac63ffddf50fe7f7b
