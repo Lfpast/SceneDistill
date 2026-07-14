@@ -64,6 +64,19 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
         --context-len 76 \
         --query-idx-divisor 4 \
         --output-layers 1 5 9 13 17 21 24
+
+VGGT-Omega, 1-based layer sweep:
+CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+        --vfm vggt_omega \
+        --vfm-name vggt-omega \
+        --split both \
+        --scannet-root data/ScanNet/ScanNet-processed \
+        --out-root data/ScanNet/FEAT \
+        --model-path ckpt/vggt_omega_1b_512.pt \
+        --use-query-frame-indices \
+        --context-len 76 \
+        --query-idx-divisor 4 \
+        --output-layers 1 4 8 12 16 20 24
 """
 import argparse
 import importlib
@@ -157,7 +170,7 @@ def main():
         default="wan",
         choices=[
             "wan", "opensora", "cogvideox", "aether",
-            "internvl", "qwen3vl", "qwen25vl", "qwen35",
+            "internvl", "qwen3vl", "qwen25vl", "qwen35", "vggt_omega",
         ],
         help="Which extractor module to invoke.",
     )
