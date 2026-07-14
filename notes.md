@@ -2,7 +2,7 @@ Before training, you should do:
 
 **dduab version**
 ```bash
-srun --job-name=l1 --nodes=1 --gpus=1 --time=8:00:00 --partition=normal --account=peilab --pty bash
+srun --job-name=l1 --nodes=1 --gpus=2 --time=8:00:00 --partition=normal --account=peilab --pty bash
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 conda activate spatialstack
