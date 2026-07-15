@@ -353,6 +353,7 @@ python -m features.run_scannet \
 ```
 
 ### SpatialStack
+**DL3DV**
 ```bash
 export SPATIALSTACK_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Journey9ni--SpatialStack-Qwen3.5-4B/snapshots/777b2289252f7c78628e0f8ac63ffddf50fe7f7b
 export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
@@ -372,6 +373,26 @@ python -m features.run_dl3dv \
   --context-len 76 \
   --query-idx-divisor 4 \
   --output-layers 32
+```
+
+**ScanNet**
+```bash
+export SPATIALSTACK_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--Journey9ni--SpatialStack-Qwen3.5-4B/snapshots/777b2289252f7c78628e0f8ac63ffddf50fe7f7b
+export VGGT_OMEGA_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt
+CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+  --vfm qwen35 \
+  --vfm-name spatialstack \
+  --split both \
+  --scannet-root "$PROBING_DATA/ScanNet/ScanNet-processed" \
+  --out-root "$PROBING_DATA/ScanNet/FEAT" \
+  --model-path "$SPATIALSTACK_PATH" \
+  --model-type spatialstack-qwen35 \
+  --geometry-encoder-path "$VGGT_OMEGA_PATH" \
+  --geometry-encoder-type vggt_omega \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1 5 9 13 17 21 25 29 32
 ```
 
 ## 3D Geometry
@@ -542,6 +563,23 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --skip-done
 ```
 
+### SpatialStack
+```bash
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/spatialstack \
+  job_name=Layer1 \
+  feat_postfix=_layer1 \
+  trainer.devices=2 \
+  callbacks.model_checkpoint.save_top_k=0
+
+# Evaluate
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/spatialstack/semantic-tagging \
+  --vfm spatialstack \
+  --skip-done
+```
+
 ## Instance Grouping
 
 ### Qwen 3.5
@@ -613,6 +651,29 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
   --eval-in-run-dir \
   --gpus 0,1 \
   --vfm qwen3.5-4b-visual \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+```
+
+### SpatialStack
+```bash
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/spatialstack \
+  job_name=Layer1 \
+  feat_postfix=_layer1 \
+  trainer.devices=2 \
+  callbacks.model_checkpoint.save_top_k=0
+
+# Evaluate
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/spatialstack/instance-grouping \
+  --output-root /project/peilab/jys/probing/ScanNet/spatialstack/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm spatialstack \
   --project Instance-Grouping \
   --hdbscan-workers 8 \
   --num-workers 2 \
