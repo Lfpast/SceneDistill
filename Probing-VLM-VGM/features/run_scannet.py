@@ -65,6 +65,22 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
         --query-idx-divisor 4 \
         --output-layers 1 5 9 13 17 21 24
 
+SpatialStack, Qwen3.5 LLM layers with VGGT-Omega geometry injection:
+CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
+        --vfm qwen35 \
+        --vfm-name spatialstack \
+        --split both \
+        --scannet-root data/ScanNet/ScanNet-processed \
+        --out-root data/ScanNet/FEAT \
+        --model-path ckpt/SpatialStack-Qwen3.5-4B \
+        --model-type spatialstack-qwen35 \
+        --geometry-encoder-path ckpt/vggt_omega_1b_512.pt \
+        --geometry-encoder-type vggt_omega \
+        --use-query-frame-indices \
+        --context-len 76 \
+        --query-idx-divisor 4 \
+        --output-layers 1 5 9 13 17 21 25 29 32
+
 VGGT-Omega, 1-based layer sweep:
 CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
         --vfm vggt_omega \

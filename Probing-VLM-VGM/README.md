@@ -317,6 +317,22 @@ python -m features.run_scannet \
   --query-idx-divisor 4 \
   --output-layers 1 5 9 13 17 21 24
 
+# ScanNet SpatialStack features: Qwen3.5 LLM layers with VGGT-Omega injection.
+python -m features.run_scannet \
+  --vfm qwen35 \
+  --vfm-name spatialstack \
+  --split both \
+  --scannet-root data/ScanNet/ScanNet-processed \
+  --out-root data/ScanNet/FEAT \
+  --model-path ckpt/SpatialStack-Qwen3.5-4B \
+  --model-type spatialstack-qwen35 \
+  --geometry-encoder-path ckpt/vggt_omega_1b_512.pt \
+  --geometry-encoder-type vggt_omega \
+  --use-query-frame-indices \
+  --context-len 76 \
+  --query-idx-divisor 4 \
+  --output-layers 1 5 9 13 17 21 25 29 32
+
 # ScanNet VGM features: VGGT-Omega, 1-based layer sweep.
 python -m features.run_scannet \
   --vfm vggt_omega \
@@ -372,6 +388,13 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   feat_postfix=_layer20 \
   trainer.devices=1
 
+# SpatialStack semantic-tagging probe. Override feat_postfix for layer sweeps.
+CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
+  experiment=scannet_tagging/spatialstack \
+  job_name=spatialstack_layer20 \
+  feat_postfix=_layer20 \
+  trainer.devices=1
+
 # VGGT-Omega semantic-tagging probe. Override feat_postfix for layer sweeps.
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/vggt-omega \
@@ -406,6 +429,12 @@ logs/scannet-tagging/runs/
       checkpoints/
       wandb/
       .hydra/
+/project/peilab/jys/probing/ScanNet/spatialstack/
+  semantic-tagging/
+    spatialstack_layer20/
+      checkpoints/
+      wandb/
+      .hydra/
 /project/peilab/jys/probing/ScanNet/vggt-omega/
   semantic-tagging/
     vggt-omega_layer24/
@@ -437,6 +466,14 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
   --views 8 \
   --runs-dir /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/semantic-tagging \
   --vfm qwen3.5-4b-visual \
+  --project Semantic-Tagging \
+  --skip-done
+
+# SpatialStack batch custom-root example.
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/spatialstack/semantic-tagging \
+  --vfm spatialstack \
   --project Semantic-Tagging \
   --skip-done
 
@@ -507,6 +544,14 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   feat_postfix=_layer1 \
   trainer.devices=2
 
+# SpatialStack instance-grouping probe. Override feat_postfix for layer sweeps.
+# This config writes to /project/peilab/jys/probing/ScanNet/spatialstack/instance-grouping/<job_name>.
+CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
+  experiment=scannet/spatialstack \
+  job_name=spatialstack_layer20 \
+  feat_postfix=_layer20 \
+  trainer.devices=2
+
 # VGGT-Omega instance-grouping probe. Override feat_postfix for layer sweeps.
 # This config writes to /project/peilab/jys/probing/ScanNet/vggt-omega/instance-grouping/<job_name>.
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
@@ -538,6 +583,12 @@ logs/scannet-instance/runs/
 /project/peilab/jys/probing/ScanNet/qwen3.5-4b-visual/
   instance-grouping/
     Layer1/
+      checkpoints/
+      wandb/
+      .hydra/
+/project/peilab/jys/probing/ScanNet/spatialstack/
+  instance-grouping/
+    spatialstack_layer20/
       checkpoints/
       wandb/
       .hydra/
@@ -596,6 +647,19 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
   --eval-in-run-dir \
   --gpus 0,1 \
   --vfm qwen3.5-4b-visual \
+  --project Instance-Grouping \
+  --hdbscan-workers 8 \
+  --num-workers 2 \
+  --skip-done
+
+# SpatialStack instance-grouping runs use the same custom-root batch eval shape:
+WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance_sharded.py \
+  --views 8 \
+  --runs-dir /project/peilab/jys/probing/ScanNet/spatialstack/instance-grouping \
+  --output-root /project/peilab/jys/probing/ScanNet/spatialstack/instance-grouping \
+  --eval-in-run-dir \
+  --gpus 0,1 \
+  --vfm spatialstack \
   --project Instance-Grouping \
   --hdbscan-workers 8 \
   --num-workers 2 \
