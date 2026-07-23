@@ -64,6 +64,24 @@ def strip_thinking_content(text: str) -> str:
     return text.strip()
 
 
+def parse_qwen3_5_layer_indices(value, name: str):
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        raw_parts = value
+    else:
+        raw_parts = [part for part in re.split(r"[:|;\s]+", str(value).strip()) if part]
+
+    try:
+        return [int(part) for part in raw_parts]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be an int list encoded without commas, e.g. {name}=11:17:23."
+        ) from exc
+
+
 def detect_qwen3_5_fast_path_runtime():
     runtime = {}
     for module_name in ("fla", "causal_conv1d"):
@@ -84,6 +102,12 @@ def move_qwen3_5_eval_inputs_to_device(inputs, device):
 
 @register_model("qwen3_5")
 class Qwen3_5(lmms):
+    def _load_config(self, pretrained):
+        return AutoConfig.from_pretrained(pretrained)
+
+    def _prepare_config_for_eval(self, config, geometry_encoder_path):
+        return config, geometry_encoder_path
+
     def __init__(
         self,
         pretrained: str = "Qwen/Qwen3.5-4B",
@@ -139,7 +163,8 @@ class Qwen3_5(lmms):
             self._device = torch.device(f"cuda:{accelerator.local_process_index}")
             self.device_map = f"cuda:{accelerator.local_process_index}"
 
-        config = AutoConfig.from_pretrained(pretrained)
+        config = self._load_config(pretrained)
+        config, geometry_encoder_path = self._prepare_config_for_eval(config, geometry_encoder_path)
         model_type = getattr(config, "model_type", None)
         if model_type not in {"qwen3_5", "qwen3_5_vl"}:
             raise ValueError(f"Unsupported model_type '{model_type}' for Qwen3.5 eval adapter.")

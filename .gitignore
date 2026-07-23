@@ -2,7 +2,9 @@ SpatialStack_temp/
 .agents/
 .codex/
 /SpatialStack/scripts/train/train.sh
-/SpatialStack/scripts/evaluation/
+/SpatialStack/scripts/evaluation/*
+!/SpatialStack/scripts/evaluation/eval_qwen35_vggt_direct.sh
+!/SpatialStack/scripts/evaluation/eval_qwen35_vgllm_add.sh
 /cache
 slurm_logs/
 train.sbatch
