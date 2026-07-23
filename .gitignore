@@ -5,6 +5,7 @@ SpatialStack_temp/
 /SpatialStack/scripts/evaluation/*
 !/SpatialStack/scripts/evaluation/eval_qwen35_vggt_direct.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_vgllm_add.sh
+!/SpatialStack/scripts/evaluation/eval_qwen35_spatialstack.sh
 /cache
 slurm_logs/
 train.sbatch
