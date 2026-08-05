@@ -319,7 +319,7 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
             past_key_values=past_key_values,
             position_ids=text_position_ids,
         )
-        linear_attn_mask = self._update_linear_attn_mask(attention_mask, past_key_values)
+        linear_attn_mask = self._update_linear_attn_mask(attention_mask, cache_position)
 
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
