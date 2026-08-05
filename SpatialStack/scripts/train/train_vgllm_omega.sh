@@ -24,6 +24,7 @@ export FEATURE_FUSION_METHOD=add
 export GEOMETRY_ENCODER_LAYERS="23"
 export GEOMETRY_FUSION_LAYERS=""      # post-merger add 不需要 fusion_layers
 export DATA_FLATTEN=False
-export OUTPUT_DIR="${OUTPUT_DIR:-./output/qwen35_vgllm_omega_add}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vgllm-omega}"
+export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
 
 bash "${SCRIPT_DIR}/train.sh"
