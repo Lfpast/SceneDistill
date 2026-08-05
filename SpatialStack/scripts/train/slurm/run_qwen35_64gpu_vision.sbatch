@@ -42,12 +42,11 @@ export MASTER_PORT="${MASTER_PORT:-29517}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${TMPDIR:-/tmp/$USER}/spatialstack-triton/${SLURM_JOB_ID:-manual}/${SLURM_PROCID:-0}}"
 mkdir -p "$TRITON_CACHE_DIR"
 
-# Use a repo-local snapshot by default; override with a local mirror if needed.
-export MODEL_PATH="${MODEL_PATH:-$PROJECT_ROOT/cache/models--Qwen--Qwen3.5-4B/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a}"
+# Use HF repo id by default; encoder / model will be auto-cached in HF_HOME.
+export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
 export USE_GEOMETRY_ENCODER="${USE_GEOMETRY_ENCODER:-False}"
 export DATA_FLATTEN="${DATA_FLATTEN:-False}"
 export OUTPUT_DIR="${OUTPUT_DIR:-./output/qwen35_64gpu_vision_${SLURM_JOB_ID}}"
-export CACHE_DIR="${CACHE_DIR:-./cache}"
 export LR="${LR:-1e-5}"
 export TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-64}"
 export DATASETS="${DATASETS:-spar_234k%60,llava_hound_64k%60,vlm3r_scannet%60,vsi_appr_order%50}"

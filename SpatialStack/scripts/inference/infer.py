@@ -181,12 +181,12 @@ def resolve_model_class(model_family: str, use_geometry_model: bool, geometry_en
                 f"Please install transformers>={MIN_QWEN3_5_TRANSFORMERS_VERSION}."
             ) from exc
         if use_geometry_model:
-            if geometry_encoder_type == "vggt_omega_alpha":
-                from qwen_vl.model.modeling_qwen3_5_vggt_omega_alpha import (
-                    Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha,
+            if geometry_encoder_type == "vggt_omega_direct":
+                from qwen_vl.model.modeling_qwen3_5_vggt_omega_direct import (
+                    Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect,
                 )
 
-                return Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha
+                return Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect
             from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
 
             return Qwen3_5ForConditionalGenerationWithGeometry

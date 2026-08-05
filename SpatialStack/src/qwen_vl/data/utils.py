@@ -14,7 +14,7 @@ import copy
 GEOMETRY_ENCODER_PATCH_SIZES = {
     "vggt": 14,
     "vggt_omega": 16,
-    "vggt_omega_alpha": 16,
+    "vggt_omega_direct": 16,
 }
 
 
@@ -207,8 +207,8 @@ def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type:
 
     for image, grid in zip(images, image_grid_thw):
         rgb_image = _load_rgb_image(image)
-        # Phase 1 (`vggt` / `vggt_omega`) and Phase 2 (`vggt_omega_alpha`) now
-        # share the same Qwen3.5 geometry-input sizing rule: derive the
+        # VGGT-family Qwen3.5 paths share the same geometry-input sizing rule:
+        # derive the
         # geometry-side resolution directly from the pre-merger Qwen patch grid.
         # This keeps input-size as the controlled variable across branches while
         # leaving the downstream fusion/injection logic unchanged.

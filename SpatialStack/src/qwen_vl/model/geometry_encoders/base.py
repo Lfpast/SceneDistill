@@ -10,7 +10,7 @@ from dataclasses import dataclass
 @dataclass
 class GeometryEncoderConfig:
     """Configuration for geometry encoders."""
-    encoder_type: str = "vggt"  # "vggt", "pi3", etc.
+    encoder_type: str = "vggt"  # "vggt", "vggt_omega", "vggt_omega_direct", etc.
     model_path: Optional[str] = None
     reference_frame: str = "first"  # "first" or "last"
     feature_dim: int = 2048  # Will be overridden by encoder's get_feature_dim()
@@ -25,7 +25,7 @@ class GeometryEncoderConfig:
 
 
 class BaseGeometryEncoder(ABC, nn.Module):
-    """Base class for geometry encoders like VGGT, Pi3, etc."""
+    """Base class for geometry encoders such as VGGT variants."""
     
     def __init__(self, config: GeometryEncoderConfig):
         super().__init__()

@@ -195,6 +195,8 @@ def train(attn_implementation="flash_attention_2"):
                 "geometry_fusion_layers",
                 "geometry_encoder_layers",
                 "include_camera_token",
+                "geometry_direct_token_mode",
+                "geometry_token_insert_position",
                 "pos_encoding_type",
                 "vision_language_fusion_layers",
             ]:
@@ -236,12 +238,12 @@ def train(attn_implementation="flash_attention_2"):
         from transformers import Qwen3_5ForConditionalGeneration
 
         if model_args.use_geometry_encoder:
-            if model_args.geometry_encoder_type == "vggt_omega_alpha":
-                from qwen_vl.model.modeling_qwen3_5_vggt_omega_alpha import (
-                    Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha,
+            if model_args.geometry_encoder_type == "vggt_omega_direct":
+                from qwen_vl.model.modeling_qwen3_5_vggt_omega_direct import (
+                    Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect,
                 )
 
-                qwen35_cls = Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha
+                qwen35_cls = Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect
             else:
                 from qwen_vl.model.modeling_qwen3_5 import Qwen3_5ForConditionalGenerationWithGeometry
 
@@ -258,6 +260,8 @@ def train(attn_implementation="flash_attention_2"):
                 "geometry_fusion_layers",
                 "geometry_encoder_layers",
                 "include_camera_token",
+                "geometry_direct_token_mode",
+                "geometry_token_insert_position",
                 "pos_encoding_type",
                 "vision_language_fusion_layers",
             ]:
@@ -329,6 +333,7 @@ def train(attn_implementation="flash_attention_2"):
     if model_args.use_geometry_encoder:
         setattr(data_args, "use_geometry_encoder", model_args.use_geometry_encoder)
         setattr(data_args, "geometry_encoder_type", model_args.geometry_encoder_type)
+        setattr(data_args, "geometry_direct_token_mode", model_args.geometry_direct_token_mode)
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     configure_warmup_steps(training_args, data_module["train_dataset"])
     trainer = Trainer(

@@ -12,7 +12,7 @@ class ModelArguments:
 
     # Geometry encoder configuration
     use_geometry_encoder: bool = field(default=False)  # Whether to use 3D geometry encoder
-    geometry_encoder_type: str = field(default="vggt")  # Type of geometry encoder ("vggt", "vggt_omega", "vggt_omega_alpha", "pi3")
+    geometry_encoder_type: str = field(default="vggt")  # Type of geometry encoder ("vggt", "vggt_omega", "vggt_omega_direct")
     geometry_encoder_path: str = field(default="facebook/VGGT-1B/")  # Path or repo id for the pre-trained geometry encoder
     reference_frame: str = field(default="first")  # Reference frame for geometry encoding ("first", "last"), only available for vggt
     feature_fusion_method: str = field(default="add")  # Method to fuse geometry and visual features ("add", "concat", "cross_attention", "gate")
@@ -21,6 +21,8 @@ class ModelArguments:
     geometry_fusion_layers: Optional[List[int]] = field(default=None)  # Vision block indices for layer-wise fusion
     geometry_encoder_layers: Optional[List[int]] = field(default=None)  # Geometry encoder layer indices
     include_camera_token: bool = field(default=False)  # Whether to include camera token
+    geometry_direct_token_mode: str = field(default="special17")  # Direct injection token set: "camera" or "special17"
+    geometry_token_insert_position: str = field(default="front")  # Direct injection token order: "front" or "back"
     pos_encoding_type: str = field(default="none")  # Position encoding: "none", "rope2d", or "sincos2d"
     vision_language_fusion_layers: Optional[List[int]] = field(default=None)  # Vision block indices to fuse into decoder
 

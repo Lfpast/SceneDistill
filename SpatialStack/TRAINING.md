@@ -149,13 +149,6 @@ Before running, set these parameters in `scripts/train/train.sh` or via env vars
 Use the Python 3.12 Qwen3.5 environment from [README.md](./README.md), then
 launch:
 
-Extra wandb argument:
-```bash
-RUN_NAME=<run_name> \
-WANDB_PROJECT=spatialstack-omega \
-WANDB_ENTITY=yjiaag-hkust \
-```
-
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
@@ -196,25 +189,89 @@ Phase1 Qwen3.5 geometry-input sizing notes:
 - For `vggt_omega`, the geometry-side input resolves to `16 * grid_h` by `16 * grid_w`, which is equivalent to `32*H` by `32*W`.
 - Only the geometry encoder input size is aligned across Phase1 and Phase2; Phase1 fusion logic and token flow remain unchanged.
 
-Experimental Phase2 `vggt_omega_alpha`:
+Experimental Phase2 direct injection (`vggt_omega_direct`):
 
 ```bash
 MODEL_PATH=Qwen/Qwen3.5-4B \
 USE_GEOMETRY_ENCODER=True \
-GEOMETRY_ENCODER_TYPE=vggt_omega_alpha \
+GEOMETRY_ENCODER_TYPE=vggt_omega_direct \
 GEOMETRY_ENCODER_PATH=/project/peilab/jys/spatialstack_store/hf_cache/hub/models--facebook--VGGT-Omega/vggt_omega_1b_512.pt \
+GEOMETRY_DIRECT_TOKEN_MODE=special17 \
+GEOMETRY_TOKEN_INSERT_POSITION=front \
 DATA_FLATTEN=False \
-OUTPUT_DIR=./output/qwen35_vggt_omega_alpha \
+OUTPUT_DIR=./output/qwen35_vggt_omega_direct \
 bash scripts/train/train.sh
 ```
 
-Phase2 alpha notes:
+Phase2 direct-injection notes:
 
 - This is a separate architecture path from the Phase1 `vggt` / `vggt_omega` fusion branches.
 - Qwen keeps its normal visual processor path; the Omega-side geometry input is resized from `image_grid_thw`, so merged token counts stay aligned without hardcoding `196` or `224x224`.
-- Each frame prepends `1 camera + 16 scene/register` tokens to the Qwen visual span before the language model.
-- The inserted special tokens use a single `frame_center` MRoPE expansion rule in this branch.
+- `GEOMETRY_DIRECT_TOKEN_MODE=camera` injects 1 camera token per frame.
+- `GEOMETRY_DIRECT_TOKEN_MODE=special17` injects `1 camera + 16 scene/register` tokens per frame.
+- `GEOMETRY_TOKEN_INSERT_POSITION` controls whether those injected tokens are inserted at the front or back of each frame's visual span. Supported values: `front`, `back`.
+- The inserted special tokens use a single `frame_top_left` MRoPE expansion rule in this branch.
 - Evaluation and inference must keep using the multi-image path for videos; do not switch this branch to Qwen's native video-token path.
+
+Three Omega comparison presets are now available in the Qwen3.5 codepath:
+
+1. SpatialStack layered fusion:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+FEATURE_FUSION_METHOD=deepstack_language_add \
+GEOMETRY_ENCODER_LAYERS="11 17 23" \
+GEOMETRY_FUSION_LAYERS="0 1 2" \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/qwen35_spatialstack_omega \
+bash scripts/train/train.sh
+```
+
+2. Direct-add baseline (`VGGT-Omega` patch features are merged to the Qwen visual-token grid, then added token-wise before the language model):
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+FEATURE_FUSION_METHOD=add \
+GEOMETRY_ENCODER_LAYERS="23" \
+GEOMETRY_MERGER_TYPE=mlp \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/qwen35_omega_direct_add \
+bash scripts/train/train.sh
+```
+
+3. Direct injection, camera-only (`1 camera` token per frame):
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega_direct \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+GEOMETRY_DIRECT_TOKEN_MODE=camera \
+GEOMETRY_TOKEN_INSERT_POSITION=front \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/qwen35_omega_direct_camera \
+bash scripts/train/train.sh
+```
+
+4. Direct injection, `1 camera + 16 register` tokens per frame:
+
+```bash
+MODEL_PATH=Qwen/Qwen3.5-4B \
+USE_GEOMETRY_ENCODER=True \
+GEOMETRY_ENCODER_TYPE=vggt_omega_direct \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+GEOMETRY_DIRECT_TOKEN_MODE=special17 \
+GEOMETRY_TOKEN_INSERT_POSITION=front \
+DATA_FLATTEN=False \
+OUTPUT_DIR=./output/qwen35_omega_direct_special17 \
+bash scripts/train/train.sh
+```
 
 Qwen3.5 notes:
 

@@ -7,18 +7,28 @@ import torch
 import torch.nn as nn
 from huggingface_hub import snapshot_download
 from safetensors import safe_open
-from transformers.cache_utils import Cache
+from transformers.cache_utils import Cache, DynamicCache
 from transformers.masking_utils import create_causal_mask
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.models.qwen3_5.modeling_qwen3_5 import (
     Qwen3_5CausalLMOutputWithPast,
-    Qwen3_5DynamicCache,
     Qwen3_5ForConditionalGeneration,
     Qwen3_5Model,
     Qwen3_5ModelOutputWithPast,
     Qwen3_5PreTrainedModel,
     Qwen3_5TextModel,
 )
+
+# transformers >= 5.5 removed the named `Qwen3_5DynamicCache` and now uses the
+# generic `DynamicCache(config=...)`. Older transformers (<= 5.4) exposed the
+# named class. Try the named import first; fall back to the generic class so
+# the same source works across both.
+try:
+    from transformers.models.qwen3_5.modeling_qwen3_5 import (  # type: ignore
+        Qwen3_5DynamicCache,
+    )
+except ImportError:
+    Qwen3_5DynamicCache = DynamicCache
 
 from .feature_fusion import (
     FeatureFusionConfig,
@@ -33,7 +43,7 @@ from .position_utils import get_2d_sincos_pos_embed
 
 GEOMETRY_STATE_KEYWORDS = (
     "geometry_encoder",
-    "alpha_projector",
+    "direct_projector",
     "language_feature_fusion",
     "feature_fusion",
     "geometry_merger",
@@ -309,7 +319,7 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
             past_key_values=past_key_values,
             position_ids=text_position_ids,
         )
-        linear_attn_mask = self._update_linear_attn_mask(attention_mask, cache_position)
+        linear_attn_mask = self._update_linear_attn_mask(attention_mask, past_key_values)
 
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)

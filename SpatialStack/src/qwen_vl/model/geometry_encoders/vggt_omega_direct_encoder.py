@@ -1,4 +1,4 @@
-"""VGGT-Omega alpha encoder that exposes camera + register tokens only."""
+"""VGGT-Omega direct-injection encoder for camera-only or special-token injection."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ from typing import List, Optional
 
 import torch
 
+from ..vggt_omega_direct_config import (
+    VGGT_OMEGA_DIRECT_TOKEN_MODE_CAMERA,
+    VGGT_OMEGA_DIRECT_TOKEN_MODE_SCENE16,
+    get_vggt_omega_direct_num_extra_tokens,
+    resolve_vggt_omega_direct_token_mode,
+)
 from .base import BaseGeometryEncoder, GeometryEncoderConfig
 from .vggt_omega_encoder import (
     _extract_model_state_dict,
@@ -18,8 +24,8 @@ from .vggt_omega_encoder import (
 _SUPPORTED_LAYER_INDICES = {4, 11, 17, 23}
 
 
-class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
-    """Frozen VGGT-Omega wrapper that returns per-frame camera + scene tokens."""
+class VGGTOmegaDirectEncoder(BaseGeometryEncoder):
+    """Frozen VGGT-Omega wrapper that exposes direct-injection special tokens."""
 
     def __init__(self, config: GeometryEncoderConfig):
         super().__init__(config)
@@ -35,7 +41,14 @@ class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
                 param.requires_grad = False
 
         self.patch_size = 16
-        self.num_special_tokens = 17
+        self.token_mode = resolve_vggt_omega_direct_token_mode(
+            config.encoder_type,
+            config.encoder_kwargs.get("direct_token_mode"),
+        )
+        self.num_special_tokens = get_vggt_omega_direct_num_extra_tokens(
+            config.encoder_type,
+            self.token_mode,
+        )
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         return self.encode_layers(images, layer_indices=[23])[0]
@@ -65,7 +78,7 @@ class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
         for layer_idx in layer_indices:
             if layer_idx not in _SUPPORTED_LAYER_INDICES:
                 raise ValueError(
-                    f"Unsupported VGGT-Omega alpha layer index {layer_idx}. "
+                    f"Unsupported VGGT-Omega direct layer index {layer_idx}. "
                     f"Supported cached layers: {sorted(_SUPPORTED_LAYER_INDICES)}."
                 )
 
@@ -77,13 +90,23 @@ class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
                 )
 
             tokens = self._apply_inverse_reference_frame_transform(tokens[0])
-            special_tokens = tokens[:, :patch_token_start]
-            if special_tokens.shape[1] != self.num_special_tokens:
+            if self.token_mode == VGGT_OMEGA_DIRECT_TOKEN_MODE_CAMERA:
+                # First token = camera
+                direct_tokens = tokens[:, :1]
+            elif self.token_mode == VGGT_OMEGA_DIRECT_TOKEN_MODE_SCENE16:
+                # 16 register / scene tokens (skip the leading camera token)
+                direct_tokens = tokens[:, 1:patch_token_start]
+            else:
+                # special17: 1 camera + 16 register
+                direct_tokens = tokens[:, :patch_token_start]
+
+            if direct_tokens.shape[1] != self.num_special_tokens:
                 raise ValueError(
-                    "VGGT-Omega alpha path expected 17 special tokens per frame, "
-                    f"but got {special_tokens.shape[1]}."
+                    "VGGT-Omega direct path expected "
+                    f"{self.num_special_tokens} special tokens per frame for token_mode={self.token_mode}, "
+                    f"but got {direct_tokens.shape[1]}."
                 )
-            tensor_features.append(special_tokens.to(dtype).contiguous())
+            tensor_features.append(direct_tokens.to(dtype).contiguous())
 
         return tensor_features
 
@@ -122,7 +145,7 @@ class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
         missing_keys = sorted(set(expected_state_dict.keys()) - set(filtered_state_dict.keys()))
         if missing_keys:
             raise RuntimeError(
-                "VGGT-Omega checkpoint is missing weights required by the SpatialStack alpha adapter. "
+                "VGGT-Omega checkpoint is missing weights required by the SpatialStack direct adapter. "
                 f"Missing keys include: {missing_keys[:8]}"
             )
 
@@ -130,3 +153,6 @@ class VGGTOmegaAlphaEncoder(BaseGeometryEncoder):
         if self.freeze_encoder:
             for param in self.vggt_omega.parameters():
                 param.requires_grad = False
+
+
+__all__ = ["VGGTOmegaDirectEncoder"]

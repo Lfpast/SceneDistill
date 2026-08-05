@@ -1,4 +1,4 @@
-"""Qwen3.5 wrapper for the VGGT-Omega alpha input-side injection path."""
+"""Qwen3.5 wrapper for the shared VGGT-Omega direct-injection path."""
 
 from __future__ import annotations
 
@@ -17,15 +17,24 @@ from .modeling_qwen3_5 import (
     Qwen3_5PreTrainedModel,
     align_qwen3_5_geometry_modules,
 )
-from .vggt_omega_alpha_packing import (
-    build_alpha_only_mask,
-    expand_image_embeds_with_alpha_tokens,
+from .vggt_omega_direct_config import (
+    get_vggt_omega_direct_num_extra_tokens,
+    is_vggt_omega_direct_geometry_encoder,
+    resolve_vggt_omega_direct_token_mode,
+)
+from .vggt_omega_direct_packing import (
+    build_direct_only_mask,
+    compute_mrope_position_deltas,
+    expand_image_embeds_with_direct_tokens,
     expand_visual_placeholders,
 )
-from .vggt_omega_alpha_projector import VGGTOmegaAlphaProjector, resolve_progressive_hidden_dim
+from .vggt_omega_direct_projector import (
+    VGGTOmegaDirectProjector,
+    resolve_progressive_hidden_dim,
+)
 
 
-def align_qwen3_5_alpha_modules(model):
+def align_qwen3_5_direct_modules(model):
     model = align_qwen3_5_geometry_modules(model)
     inner_model = getattr(model, "model", None)
     if inner_model is None:
@@ -33,25 +42,36 @@ def align_qwen3_5_alpha_modules(model):
 
     reference_tensor = getattr(getattr(model, "lm_head", None), "weight", None)
     if reference_tensor is not None and reference_tensor.device.type != "meta":
-        alpha_projector = getattr(inner_model, "alpha_projector", None)
-        if alpha_projector is not None and hasattr(alpha_projector, "to"):
-            alpha_projector.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
+        direct_projector = getattr(inner_model, "direct_projector", None)
+        if direct_projector is not None and hasattr(direct_projector, "to"):
+            direct_projector.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
 
-    model.alpha_projector = getattr(inner_model, "alpha_projector", None)
+    model.direct_projector = getattr(inner_model, "direct_projector", None)
     return model
 
 
-class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
+class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
     def __init__(self, config):
-        self.alpha_projector = None
+        self.direct_projector = None
         super().__init__(config)
-        self.alpha_projector = getattr(self, "alpha_projector", None)
+        self.direct_projector = getattr(self, "direct_projector", None)
 
-    def _is_alpha_geometry(self) -> bool:
-        return getattr(self.config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha"
+    def _direct_token_insert_position(self) -> str:
+        return getattr(self.config, "geometry_token_insert_position", "front")
+
+    def _direct_token_mode(self) -> str:
+        return resolve_vggt_omega_direct_token_mode(
+            getattr(self.config, "geometry_encoder_type", "vggt"),
+            getattr(self.config, "geometry_direct_token_mode", None),
+        )
+
+    def _is_direct_geometry(self) -> bool:
+        return is_vggt_omega_direct_geometry_encoder(
+            getattr(self.config, "geometry_encoder_type", "vggt")
+        )
 
     def _validate_geometry_config(self, config):
-        if getattr(config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha":
+        if is_vggt_omega_direct_geometry_encoder(getattr(config, "geometry_encoder_type", "vggt")):
             return
         super()._validate_geometry_config(config)
 
@@ -59,22 +79,24 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
         if self._geometry_modules_initialized:
             return
 
-        if not self._is_alpha_geometry():
+        if not self._is_direct_geometry():
             super().initialize_geometry_modules()
             return
 
         config = self.config
         encoder_config = GeometryEncoderConfig(
-            encoder_type=getattr(config, "geometry_encoder_type", "vggt_omega_alpha"),
+            encoder_type=getattr(config, "geometry_encoder_type", "vggt_omega_direct"),
             model_path=getattr(config, "geometry_encoder_path", None),
             reference_frame=getattr(config, "reference_frame", "first"),
             freeze_encoder=getattr(config, "geometry_encoder_freeze", True),
+            encoder_kwargs={"direct_token_mode": self._direct_token_mode()},
         )
         self.geometry_encoder = create_geometry_encoder(
             encoder_type=encoder_config.encoder_type,
             model_path=encoder_config.model_path,
             reference_frame=encoder_config.reference_frame,
             freeze_encoder=encoder_config.freeze_encoder,
+            **encoder_config.encoder_kwargs,
         )
         projector_input_dim = self.geometry_encoder.get_feature_dim()
         projector_output_dim = config.text_config.hidden_size
@@ -83,12 +105,12 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
             projector_output_dim,
             projector_output_dim,
         )
-        self.alpha_projector = VGGTOmegaAlphaProjector(
+        self.direct_projector = VGGTOmegaDirectProjector(
             input_dim=projector_input_dim,
             hidden_dim=projector_hidden_dim,
             output_dim=projector_output_dim,
         )
-        self.alpha_projector.apply(self._init_weights)
+        self.direct_projector.apply(self._init_weights)
         self._geometry_modules_initialized = True
 
     def align_geometry_modules(self, reference_tensor: Optional[torch.Tensor] = None):
@@ -102,13 +124,13 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
             return
         if getattr(reference_tensor, "device").type == "meta":
             return
-        if self.alpha_projector is not None:
-            self.alpha_projector.to(
+        if self.direct_projector is not None:
+            self.direct_projector.to(
                 device=reference_tensor.device,
                 dtype=reference_tensor.dtype,
             )
 
-    def _collect_alpha_features(
+    def _collect_direct_features(
         self,
         geometry_encoder_inputs: List[torch.Tensor],
         target_device: torch.device,
@@ -123,7 +145,10 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
         if not per_sample_features:
             return torch.zeros(
                 0,
-                getattr(self.geometry_encoder, "num_special_tokens", 17),
+                get_vggt_omega_direct_num_extra_tokens(
+                    getattr(self.config, "geometry_encoder_type", "vggt"),
+                    getattr(self.config, "geometry_direct_token_mode", None),
+                ),
                 self.geometry_encoder.get_feature_dim(),
                 device=target_device,
                 dtype=target_dtype,
@@ -153,13 +178,13 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
         **kwargs,
     ) -> Qwen3_5ModelOutputWithPast:
-        alpha_active = (
-            self._is_alpha_geometry()
+        direct_active = (
+            self._is_direct_geometry()
             and pixel_values is not None
             and image_grid_thw is not None
             and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
         )
-        if not alpha_active:
+        if not direct_active:
             return super().forward(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -178,18 +203,18 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
 
         if pixel_values_videos is not None:
             raise NotImplementedError(
-                "vggt_omega_alpha only supports the multi-image path; native Qwen video inputs are unsupported."
+                "VGGT-Omega direct injection only supports the multi-image path; native Qwen video inputs are unsupported."
             )
         if input_ids is None:
-            raise ValueError("vggt_omega_alpha requires input_ids so visual placeholders can be expanded.")
+            raise ValueError("VGGT-Omega direct injection requires input_ids so visual placeholders can be expanded.")
         if geometry_encoder_inputs is None:
-            raise ValueError("vggt_omega_alpha requires geometry_encoder_inputs.")
+            raise ValueError("VGGT-Omega direct injection requires geometry_encoder_inputs.")
         if inputs_embeds is not None:
-            raise ValueError("vggt_omega_alpha does not support precomputed inputs_embeds on the first visual step.")
+            raise ValueError("VGGT-Omega direct injection does not support precomputed inputs_embeds on the first visual step.")
 
         inputs_embeds = self.get_input_embeddings()(input_ids)
 
-        if self.geometry_encoder is None or self.alpha_projector is None:
+        if self.geometry_encoder is None or self.direct_projector is None:
             self.initialize_geometry_modules()
         self.align_geometry_modules(inputs_embeds)
 
@@ -206,21 +231,23 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
             image_embeds = torch.cat(list(pooler_output), dim=0)
         image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
 
-        alpha_features = self._collect_alpha_features(
+        direct_features = self._collect_direct_features(
             geometry_encoder_inputs,
             target_device=inputs_embeds.device,
             target_dtype=inputs_embeds.dtype,
         )
-        alpha_embeds = self.alpha_projector(alpha_features)
-        alpha_tokens_per_frame = alpha_embeds.shape[1]
+        direct_embeds = self.direct_projector(direct_features)
+        direct_tokens_per_frame = direct_embeds.shape[1]
+        insert_position = self._direct_token_insert_position()
         patches_per_frame = self._per_frame_visual_sizes(
             image_grid_thw,
             spatial_merge_size=getattr(self.config.vision_config, "spatial_merge_size", 2),
         )
-        image_embeds_expanded = expand_image_embeds_with_alpha_tokens(
+        image_embeds_expanded = expand_image_embeds_with_direct_tokens(
             image_embeds,
-            alpha_embeds,
+            direct_embeds,
             patches_per_frame,
+            insert_position=insert_position,
         )
 
         if position_ids is None:
@@ -240,7 +267,8 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
             attention_mask=attention_mask,
             position_ids=position_ids,
             placeholder_token_id=int(self.config.image_token_id),
-            num_extra_per_frame=alpha_tokens_per_frame,
+            num_extra_per_frame=direct_tokens_per_frame,
+            insert_position=insert_position,
         )
 
         expanded_inputs_embeds = self.get_input_embeddings()(new_input_ids).to(
@@ -254,8 +282,17 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
         )
         expanded_inputs_embeds = expanded_inputs_embeds.masked_scatter(image_mask, image_embeds_expanded)
 
-        alpha_only_mask = build_alpha_only_mask(image_mask[..., 0], alpha_tokens_per_frame)
-        self._alpha_only_mask = alpha_only_mask
+        direct_only_mask = build_direct_only_mask(
+            image_mask[..., 0],
+            direct_tokens_per_frame,
+            insert_position=insert_position,
+        )
+        self._direct_only_mask = direct_only_mask
+        self.rope_deltas = compute_mrope_position_deltas(
+            new_position_ids,
+            new_input_ids,
+            new_attention_mask,
+        )
 
         outputs = self.language_model(
             input_ids=None,
@@ -273,12 +310,12 @@ class Qwen3_5ModelWithVGGTOmegaAlpha(Qwen3_5ModelWithGeometry):
         )
 
 
-class Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha(Qwen3_5ForConditionalGenerationWithGeometry):
+class Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect(Qwen3_5ForConditionalGenerationWithGeometry):
     def __init__(self, config):
         Qwen3_5PreTrainedModel.__init__(self, config)
-        self.model = Qwen3_5ModelWithVGGTOmegaAlpha(config)
+        self.model = Qwen3_5ModelWithVGGTOmegaDirect(config)
         self.geometry_encoder = self.model.geometry_encoder
-        self.alpha_projector = self.model.alpha_projector
+        self.direct_projector = self.model.direct_projector
         self.language_feature_fusion = self.model.language_feature_fusion
         self.feature_fusion = self.model.feature_fusion
         self.geometry_merger = self.model.geometry_merger
@@ -289,7 +326,7 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha(Qwen3_5ForConditionalGen
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-        return align_qwen3_5_alpha_modules(model)
+        return align_qwen3_5_direct_modules(model)
 
     def forward(
         self,
@@ -310,22 +347,27 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha(Qwen3_5ForConditionalGen
         tag: Optional[str] = None,
         **kwargs,
     ) -> Qwen3_5CausalLMOutputWithPast:
-        alpha_active = (
-            getattr(self.config, "geometry_encoder_type", "vggt") == "vggt_omega_alpha"
+        direct_active = (
+            is_vggt_omega_direct_geometry_encoder(getattr(self.config, "geometry_encoder_type", "vggt"))
             and pixel_values is not None
             and image_grid_thw is not None
             and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
         )
 
         expanded_labels = labels
-        if alpha_active and labels is not None and input_ids is not None:
+        if direct_active and labels is not None and input_ids is not None:
+            num_extra_per_frame = get_vggt_omega_direct_num_extra_tokens(
+                getattr(self.config, "geometry_encoder_type", "vggt"),
+                getattr(self.config, "geometry_direct_token_mode", None),
+            )
             expanded_input_ids, expanded_labels, _, _ = expand_visual_placeholders(
                 input_ids=input_ids,
                 labels=labels,
                 attention_mask=None,
                 position_ids=None,
                 placeholder_token_id=int(self.config.image_token_id),
-                num_extra_per_frame=17,
+                num_extra_per_frame=num_extra_per_frame,
+                insert_position=getattr(self.config, "geometry_token_insert_position", "front"),
             )
             del expanded_input_ids
 
@@ -365,3 +407,10 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaAlpha(Qwen3_5ForConditionalGen
             attentions=outputs.attentions,
             rope_deltas=outputs.rope_deltas,
         )
+
+
+__all__ = [
+    "Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect",
+    "Qwen3_5ModelWithVGGTOmegaDirect",
+    "align_qwen3_5_direct_modules",
+]
