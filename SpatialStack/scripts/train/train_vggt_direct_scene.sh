@@ -16,5 +16,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export GEOMETRY_DIRECT_TOKEN_MODE=scene16
 export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vggt-direct-scene}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
+export WANDB_PROJECT="spatialstack-omega"
 
 bash "${SCRIPT_DIR}/train_vggt_direct.sh"

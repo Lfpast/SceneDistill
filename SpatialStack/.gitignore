@@ -6,6 +6,7 @@
 /output/
 /cache/
 /logs/
+/wandb/
 /env/
 /slurm_logs/
 hf_cache/
