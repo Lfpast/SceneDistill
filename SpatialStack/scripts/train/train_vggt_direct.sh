@@ -44,6 +44,6 @@ export GEOMETRY_FUSION_LAYERS=""
 export GEOMETRY_ENCODER_LAYERS=""
 
 export DATA_FLATTEN=False
-export OUTPUT_DIR="${OUTPUT_DIR:-./output/qwen35_vggt_direct}"
+export OUTPUT_DIR="/project/peilab/jys/qwen3_5_output/vggt-direct"
 
 bash "${SCRIPT_DIR}/train.sh"
