@@ -1,4 +1,11 @@
 #!/bin/bash
+#SBATCH --job-name=vgllm-omega
+#SBATCH --partition=normal            # Change to your cluster's GPU partition
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:8
+#SBATCH --time=12:00:00
+#SBATCH --account=peilab
+#SBATCH --output=vgllm-omega.out
 # ============================================================================
 # VG-LLM 变体: 用 VGGT-Omega 替代 VGGT-1B 做 post-merger add 融合
 # ----------------------------------------------------------------------------
@@ -27,5 +34,14 @@ export DATA_FLATTEN=False
 export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vgllm-omega}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
 export WANDB_PROJECT="spatialstack-omega"
+export WANDB_MODE="online"
+export WANDB_LOCAL_ROOT="${TMPDIR:-/tmp}/spatialstack-omega-wandb"
+export WANDB_DIR="${WANDB_LOCAL_ROOT}/runs"
+export WANDB_CACHE_DIR="${WANDB_LOCAL_ROOT}/cache"
+export WANDB_DATA_DIR="${WANDB_LOCAL_ROOT}/data"
+export WANDB_ARTIFACT_DIR="${WANDB_LOCAL_ROOT}/artifacts"
+export WANDB_CONSOLE="off"
+export WANDB_DISABLE_GIT="true"
+export WANDB_DISABLE_CODE="true"
 
 bash "${SCRIPT_DIR}/train.sh"

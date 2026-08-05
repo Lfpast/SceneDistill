@@ -1,4 +1,11 @@
 #!/bin/bash
+#SBATCH --job-name=vggt-direct
+#SBATCH --partition=normal            # Change to your cluster's GPU partition
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:8
+#SBATCH --time=12:00:00
+#SBATCH --account=peilab
+#SBATCH --output=vggt-direct.out
 # ============================================================================
 # VGGT-Direct: 把 VGGT-Omega 的 1 camera + 16 scene/register token 直接拼到
 # 每帧 visual span 前, 无蒸馏, 只学 direct_projector + LLM
@@ -47,5 +54,14 @@ export DATA_FLATTEN=False
 export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vggt-direct}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
 export WANDB_PROJECT="spatialstack-omega"
+export WANDB_MODE="online"
+export WANDB_LOCAL_ROOT="${TMPDIR:-/tmp}/spatialstack-omega-wandb"
+export WANDB_DIR="${WANDB_LOCAL_ROOT}/runs"
+export WANDB_CACHE_DIR="${WANDB_LOCAL_ROOT}/cache"
+export WANDB_DATA_DIR="${WANDB_LOCAL_ROOT}/data"
+export WANDB_ARTIFACT_DIR="${WANDB_LOCAL_ROOT}/artifacts"
+export WANDB_CONSOLE="off"
+export WANDB_DISABLE_GIT="true"
+export WANDB_DISABLE_CODE="true"
 
 bash "${SCRIPT_DIR}/train.sh"
