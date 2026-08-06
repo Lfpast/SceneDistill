@@ -4,9 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export MODEL_PATH="${MODEL_PATH:-ddz16/qwen35-4B-vgllm-add}"
+export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen3_5_output/vgllm-omega}"
 export MODEL_IMPL="${MODEL_IMPL:-qwen3_5_vgllm_add}"
-export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-1B}"
+export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-Omega}"
 export GEOMETRY_ENCODER_LAYERS="${GEOMETRY_ENCODER_LAYERS:-23}"
 export BENCHMARKS="${BENCHMARKS:-vsibench, cvbench, blink_spatial, sparbench, videomme, mmsibench}"
 

@@ -12,9 +12,11 @@ class Qwen3_5VGGTDIRECT(Qwen3_5):
 
     def __init__(
         self,
-        geometry_encoder_layers: Optional[Union[str, int]] = "11:17:23",
+        geometry_encoder_layers: Optional[Union[str, int]] = None,
         geometry_fusion_layers: Optional[Union[str, int]] = None,
-        compatibility_geometry_encoder_type: str = "vggt_omega",
+        geometry_direct_token_mode: Optional[str] = None,
+        geometry_token_insert_position: Optional[str] = None,
+        compatibility_geometry_encoder_type: str = "vggt_omega_direct",
         **kwargs,
     ) -> None:
         self._direct_geometry_encoder_layers = parse_qwen3_5_layer_indices(
@@ -25,6 +27,8 @@ class Qwen3_5VGGTDIRECT(Qwen3_5):
             geometry_fusion_layers,
             "geometry_fusion_layers",
         )
+        self._direct_token_mode = geometry_direct_token_mode
+        self._direct_token_insert_position = geometry_token_insert_position
         self._compatibility_geometry_encoder_type = compatibility_geometry_encoder_type
         super().__init__(**kwargs)
 
@@ -41,29 +45,28 @@ class Qwen3_5VGGTDIRECT(Qwen3_5):
                 "geometry_encoder_type='vggt_omega_direct' or architecture "
                 "Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect."
             )
-        if self._compatibility_geometry_encoder_type != "vggt_omega":
+        if self._compatibility_geometry_encoder_type != "vggt_omega_direct":
             raise ValueError(
-                "qwen3_5_vggt_direct currently maps direct checkpoints only to the existing "
-                "vggt_omega geometry encoder."
-            )
-        if not self._direct_geometry_encoder_layers:
-            raise ValueError(
-                "qwen3_5_vggt_direct requires geometry_encoder_layers, e.g. "
-                "geometry_encoder_layers=11:17:23."
+                "qwen3_5_vggt_direct requires compatibility_geometry_encoder_type='vggt_omega_direct' "
+                "so eval uses the direct-injection model class."
             )
 
         setattr(config, "use_geometry_encoder", True)
-        setattr(config, "direct_geometry_encoder_type", original_encoder_type)
-        setattr(config, "geometry_encoder_type", self._compatibility_geometry_encoder_type)
-        setattr(config, "geometry_encoder_layers", self._direct_geometry_encoder_layers)
+        setattr(config, "geometry_encoder_type", original_encoder_type or self._compatibility_geometry_encoder_type)
+        if self._direct_geometry_encoder_layers is not None:
+            setattr(config, "geometry_encoder_layers", self._direct_geometry_encoder_layers)
         if self._direct_geometry_fusion_layers is not None:
             setattr(config, "geometry_fusion_layers", self._direct_geometry_fusion_layers)
+        if self._direct_token_mode is not None:
+            setattr(config, "geometry_direct_token_mode", self._direct_token_mode)
+        if self._direct_token_insert_position is not None:
+            setattr(config, "geometry_token_insert_position", self._direct_token_insert_position)
 
         geometry_encoder_path = geometry_encoder_path or getattr(config, "geometry_encoder_path", None)
         eval_logger.warning(
-            "Using qwen3_5_vggt_direct compatibility adapter: mapped "
-            f"geometry_encoder_type={original_encoder_type!r} to "
-            f"{self._compatibility_geometry_encoder_type!r}, "
-            f"geometry_encoder_layers={self._direct_geometry_encoder_layers}."
+            "Using qwen3_5_vggt_direct compatibility adapter: "
+            f"geometry_encoder_type={getattr(config, 'geometry_encoder_type', None)!r}, "
+            f"geometry_direct_token_mode={getattr(config, 'geometry_direct_token_mode', None)!r}, "
+            f"geometry_token_insert_position={getattr(config, 'geometry_token_insert_position', None)!r}."
         )
         return config, geometry_encoder_path

@@ -82,6 +82,25 @@ def move_qwen3_5_eval_inputs_to_device(inputs, device):
     return inputs
 
 
+def parse_qwen3_5_layer_indices(value, name: str) -> Optional[List[int]]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [int(item) for item in value]
+
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null"}:
+        return None
+
+    parts = [part for part in re.split(r"[:;\s]+", text) if part]
+    try:
+        return [int(part) for part in parts]
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a colon- or space-separated integer list, got {value!r}.") from exc
+
+
 @register_model("qwen3_5")
 class Qwen3_5(lmms):
     def __init__(
@@ -143,6 +162,9 @@ class Qwen3_5(lmms):
         model_type = getattr(config, "model_type", None)
         if model_type not in {"qwen3_5", "qwen3_5_vl"}:
             raise ValueError(f"Unsupported model_type '{model_type}' for Qwen3.5 eval adapter.")
+        prepare_config = getattr(self, "_prepare_config_for_eval", None)
+        if prepare_config is not None:
+            config, geometry_encoder_path = prepare_config(config, geometry_encoder_path)
         use_geometry_model = getattr(config, "use_geometry_encoder", False) or getattr(config, "use_vggt_feature", False)
         if use_geometry_model and int(batch_size) != 1:
             raise ValueError("Qwen3.5 geometry evaluation currently requires batch_size=1.")
