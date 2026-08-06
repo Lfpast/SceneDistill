@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:8
 #SBATCH --time=12:00:00
 #SBATCH --account=peilab
-#SBATCH --output=spatialstack-omega.out
+#SBATCH --output=slurm_logs/spatialstack-omega.out
 # ============================================================================
 # SpatialStack 变体: 用 VGGT-Omega 替代 VGGT-1B 做几何层级融合
 # ----------------------------------------------------------------------------
@@ -26,6 +26,18 @@
 # ============================================================================
 set -euo pipefail
 
+module load slurm
+module load cuda12.2/toolkit/12.2.2
+source activate spatialstack
+cd /home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
+export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
+export REPO_ROOT=/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
+export SS_ROOT=/project/peilab/jys/spatialstack_store
+export HF_HOME=$SS_ROOT/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export HF_XET_HIGH_PERFORMANCE=1
+export LD_PRELOAD=/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
@@ -51,4 +63,4 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-bash "${SCRIPT_DIR}/train.sh"
+bash "/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/scripts/train/train.sh"
