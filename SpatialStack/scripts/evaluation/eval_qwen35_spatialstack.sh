@@ -4,9 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export MODEL_PATH="${MODEL_PATH:-ddz16/qwen35-4B-spatialstack}"
+export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen3_5_output/spatialstack-omega}"
 export MODEL_IMPL="${MODEL_IMPL:-qwen3_5_spatialstack}"
-export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-1B}"
+export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-Omega}"
 export GEOMETRY_ENCODER_LAYERS="${GEOMETRY_ENCODER_LAYERS:-11:17:23}"
 export GEOMETRY_FUSION_LAYERS="${GEOMETRY_FUSION_LAYERS:-0:1:2}"
 export BENCHMARKS="${BENCHMARKS:-vsibench, cvbench, blink_spatial, sparbench, videomme, mmsibench}"

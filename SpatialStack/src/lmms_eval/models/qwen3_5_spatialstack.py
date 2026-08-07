@@ -36,9 +36,9 @@ class Qwen3_5SpatialStack(Qwen3_5):
                 "qwen3_5_spatialstack only supports checkpoints with architecture "
                 "Qwen3_5ForConditionalGenerationWithGeometry."
             )
-        if encoder_type != "vggt":
+        if encoder_type not in {"vggt", "vggt_omega"}:
             raise ValueError(
-                "qwen3_5_spatialstack only supports geometry_encoder_type='vggt'. "
+                "qwen3_5_spatialstack only supports geometry_encoder_type='vggt' or 'vggt_omega'. "
                 f"Got {encoder_type!r}."
             )
         if fusion_method != "deepstack_language_add":

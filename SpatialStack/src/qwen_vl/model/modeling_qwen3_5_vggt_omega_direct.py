@@ -275,6 +275,14 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
             inputs_embeds.device,
             inputs_embeds.dtype,
         )
+        if cache_position is not None and cache_position.shape[0] != expanded_inputs_embeds.shape[1]:
+            start_position = int(cache_position[0].item())
+            cache_position = torch.arange(
+                start_position,
+                start_position + expanded_inputs_embeds.shape[1],
+                device=cache_position.device,
+                dtype=cache_position.dtype,
+            )
         image_mask, _ = self.get_placeholder_mask(
             new_input_ids,
             inputs_embeds=expanded_inputs_embeds,

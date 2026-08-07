@@ -40,21 +40,32 @@ def _build_extra_position_ids(
         return None
 
     if run_position_ids.dim() == 2:
-        # Vision MRoPE path: [3, run_len]. Place the inserted token(s) at the
-        # frame's top-left coordinate in H/W while keeping the same temporal
-        # coordinate as the frame.
-        temporal = int(run_position_ids[0, 0].item())
+        # Qwen3.5 may pass [4, run_len] position ids where row 0 is the text
+        # position used by the causal mask and rows 1: are visual MRoPE ids.
+        # Keep that text row when present; the language model strips it before
+        # applying rotary embeddings.
+        if run_position_ids.shape[0] == 4:
+            text_anchor = run_position_ids[0, :1].view(1, 1)
+            visual_position_ids = run_position_ids[1:]
+        elif run_position_ids.shape[0] == 3:
+            text_anchor = None
+            visual_position_ids = run_position_ids
+        else:
+            raise ValueError(
+                "Unsupported 2D per-row position_ids shape "
+                f"{tuple(run_position_ids.shape)}; expected [3, run_len] or [4, run_len]."
+            )
 
-        height_ids = run_position_ids[1]
-        width_ids = run_position_ids[2]
-        height_min = int(height_ids.min().item())
-        width_min = int(width_ids.min().item())
-
-        return torch.tensor(
-            [[temporal], [height_min], [width_min]],
-            device=run_position_ids.device,
-            dtype=run_position_ids.dtype,
-        ).expand(-1, num_extra_tokens)
+        visual_anchor = torch.stack(
+            [
+                visual_position_ids[0, 0],
+                visual_position_ids[1].min(),
+                visual_position_ids[2].min(),
+            ]
+        ).view(3, 1)
+        if text_anchor is not None:
+            visual_anchor = torch.cat([text_anchor, visual_anchor], dim=0)
+        return visual_anchor.expand(-1, num_extra_tokens)
 
     if run_position_ids.dim() == 1:
         anchor = int(run_position_ids[0].item())
@@ -348,6 +359,9 @@ def compute_mrope_position_deltas(
 ) -> Optional[torch.Tensor]:
     if position_ids is None or position_ids.dim() != 3:
         return None
+
+    if position_ids.shape[0] == 4:
+        position_ids = position_ids[1:]
 
     deltas = []
     seq_len = input_ids.shape[1]
