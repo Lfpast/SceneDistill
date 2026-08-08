@@ -88,10 +88,12 @@ REPORT_TO=none bash scripts/train/train_pure.sh
 ```
 ./output/<recipe>/
   ├── train.rank0.log                  # 全部 stdout
-  ├── checkpoint-1000/, 2000/, 3000/   # 每 save_steps 存一次
+  ├── config.json / model*.safetensors # 训练结束后的最终成果
   ├── trainer_state.json               # step/loss/lr 完整历史
   └── wandb/                           # 本地 wandb cache
 ```
+
+默认 `save_strategy=no`, 不再保存训练中的 `checkpoint-*` 目录。
 
 ## 常见组合
 
@@ -100,8 +102,8 @@ REPORT_TO=none bash scripts/train/train_pure.sh
 DATASETS="llava_hound_64k%1" TOTAL_BATCH_SIZE=8 \
   bash scripts/train/train_pure.sh
 
-# 从中间 checkpoint 恢复训练 (自动检测)
-bash scripts/train/train_spatialstack.sh   # 若 OUTPUT_DIR 里已有 checkpoint-* 会自动 resume
+# 默认不再写中间 checkpoint; 若 OUTPUT_DIR 里已有旧 checkpoint-* 仍会自动 resume
+bash scripts/train/train_spatialstack.sh
 
 # 训一版对比: VGGT vs VGGT-Omega, deepstack_language_add
 OUTPUT_DIR=./output/spatialstack_vggt bash scripts/train/train_spatialstack.sh
@@ -124,7 +126,7 @@ GEOMETRY_DIRECT_TOKEN_MODE=camera OUTPUT_DIR=./output/qwen35_vggt_direct_camera 
 | `GEOMETRY_ENCODER_PATH` | `facebook/VGGT-1B` 或 `facebook/VGGT-Omega` | 几何编码器 repo id |
 | `GEOMETRY_DIRECT_TOKEN_MODE` | `special17` | 仅 vggt_direct: camera/scene16/special17 |
 | `GEOMETRY_TOKEN_INSERT_POSITION` | `front` | 仅 vggt_direct: front/back |
-| `OUTPUT_DIR` | `./output/<recipe>` | checkpoint 输出目录 |
+| `OUTPUT_DIR` | `./output/<recipe>` | 最终模型输出目录 |
 | `DATASETS` | 4 dataset 混合 | 训练数据集 |
 | `LR` | `1e-5` | learning rate |
 | `TOTAL_BATCH_SIZE` | `64` | 全局 batch |
