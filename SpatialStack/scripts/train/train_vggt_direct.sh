@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=vggt-direct
-#SBATCH --partition=normal            # Change to your cluster's GPU partition
+#SBATCH --job-name=vggt-camera
+#SBATCH --partition=preempt            # Change to your cluster's GPU partition
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --time=12:00:00
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/vggt-direct.out
+#SBATCH --output=slurm_logs/vggt-camera.out
 # ============================================================================
 # VGGT-Direct: 把 VGGT-Omega 的 1 camera + 16 scene/register token 直接拼到
 # 每帧 visual span 前, 无蒸馏, 只学 direct_projector + LLM
@@ -34,14 +34,14 @@ set -euo pipefail
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 source activate spatialstack
-cd /home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
-export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT=/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
+cd /home/yjiaag/SpatialStack-omega/SpatialStack
+export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
+export REPO_ROOT=/home/yjiaag/SpatialStack-omega/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
-export LD_PRELOAD=/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
 export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,7 +55,7 @@ export GEOMETRY_ENCODER_TYPE=vggt_omega_direct
 export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-Omega}"
 
 # Direct injection 特有参数
-export GEOMETRY_DIRECT_TOKEN_MODE="${GEOMETRY_DIRECT_TOKEN_MODE:-special17}"   # camera(1) | scene16(16) | special17(17)
+export GEOMETRY_DIRECT_TOKEN_MODE="${GEOMETRY_DIRECT_TOKEN_MODE:-camera}"   # camera(1) | scene16(16) | special17(17)
 export GEOMETRY_TOKEN_INSERT_POSITION="${GEOMETRY_TOKEN_INSERT_POSITION:-front}"  # front | back
 
 # Direct 分支不用 layered fusion, 显式清空这些
@@ -64,7 +64,7 @@ export GEOMETRY_FUSION_LAYERS=""
 export GEOMETRY_ENCODER_LAYERS=""
 
 export DATA_FLATTEN=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vggt-direct}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/vggt-camera}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
 export WANDB_PROJECT="spatialstack-omega"
 export WANDB_MODE="online"
@@ -77,4 +77,4 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-bash "/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack/scripts/train/train.sh"
+bash "/home/yjiaag/SpatialStack-omega/SpatialStack/scripts/train/train.sh"
