@@ -78,6 +78,8 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             raise ValueError("SceneDistill requires reference_frame='first'.")
         if not getattr(config, "geometry_encoder_freeze", True):
             raise ValueError("SceneDistill requires a frozen VGGT-Omega teacher.")
+        if float(getattr(config, "distill_weight", DISTILL_WEIGHT)) < 0:
+            raise ValueError("SceneDistill distill_weight must be non-negative.")
 
     def initialize_geometry_modules(self):
         if self._geometry_modules_initialized:
@@ -427,7 +429,8 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         if compute_scene_distill_loss:
             if loss is None or distill_loss is None:
                 raise RuntimeError("SceneDistill training requires both SFT and distillation losses.")
-            loss = loss + DISTILL_WEIGHT * distill_loss
+            distill_weight = float(getattr(self.config, "distill_weight", DISTILL_WEIGHT))
+            loss = loss + distill_weight * distill_loss
 
         return Qwen3_5CausalLMOutputWithPast(
             loss=loss,

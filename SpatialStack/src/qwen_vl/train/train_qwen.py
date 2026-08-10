@@ -289,6 +289,8 @@ def train(attn_implementation="flash_attention_2"):
                 "vision_language_fusion_layers",
             ]:
                 setattr(config, k, getattr(model_args, k))
+            if model_args.geometry_encoder_type == "scene_distill":
+                setattr(config, "distill_weight", model_args.distill_weight)
 
             assert model_args.geometry_encoder_path is not None, (
                 "geometry_encoder_path must be set in the config when use_geometry_encoder is True."
