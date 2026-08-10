@@ -1,20 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=vggt-direct-scene
-#SBATCH --partition=normal            # Change to your cluster's GPU partition
-#SBATCH --nodes=1
-#SBATCH --gres=gpu:8
-#SBATCH --time=12:00:00
+#SBATCH --job-name=SceneDistill-multinode
+#SBATCH --partition=normal
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/vggt-direct-scene.out
+#SBATCH --nodes=2
+#SBATCH --gpus-per-node=8
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=12:00:00
+#SBATCH --output=slurm_logs/SceneDistill-multinode-%j.out
+#SBATCH --error=slurm_logs/SceneDistill-multinode-%j.err
 # ============================================================================
-# VGGT-Direct (scene16 变体): 只把 VGGT-Omega 的 16 个 register/scene token
-# 拼到每帧 visual span 前, 不含 camera token, 无蒸馏.
-# ----------------------------------------------------------------------------
-# 跟 train_vggt_direct.sh 完全一样, 只是 GEOMETRY_DIRECT_TOKEN_MODE=scene16.
-# 每帧注入 K=16 个 register token (跳过 VGGT-Omega 输出的第一个 camera token).
-#
-# 用法:
-#   bash scripts/train/train_vggt_direct_scene.sh
+# SceneDistill multi-node training (default: 2 nodes x 8 GPUs).
+# Submit from SpatialStack with:
+#   sbatch scripts/train/train_scene_distill_multinode.sh
+# Override requested nodes at submission time, for example:
+#   sbatch --nodes=4 scripts/train/train_scene_distill_multinode.sh
+# Keep NPROC_PER_NODE equal to the #SBATCH --gpus-per-node value.
 # ============================================================================
 set -euo pipefail
 
@@ -25,6 +25,7 @@ module load slurm
 module load cuda12.2/toolkit/12.2.2
 source activate spatialstack
 cd "${PROJECT_ROOT}"
+
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
 export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
@@ -34,27 +35,26 @@ export HF_XET_HIGH_PERFORMANCE=1
 export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
 export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 
-export GEOMETRY_DIRECT_TOKEN_MODE=scene16
-
 export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
-
-# HF repo id: encoder 会 snapshot_download 到 HF_HOME/hub (只下一次).
-# 也可指本地 .pt 或含 vggt_omega_1b_*.pt 的目录 (调试用).
 export USE_GEOMETRY_ENCODER=True
-export GEOMETRY_ENCODER_TYPE=vggt_omega_direct
+export GEOMETRY_ENCODER_TYPE=scene_distill
 export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-Omega}"
-
-# Direct injection 特有参数
-export GEOMETRY_TOKEN_INSERT_POSITION="${GEOMETRY_TOKEN_INSERT_POSITION:-front}"  # front | back
-
-# Direct 分支不用 layered fusion, 显式清空这些
-export FEATURE_FUSION_METHOD=""
-export GEOMETRY_FUSION_LAYERS=""
+export GEOMETRY_ENCODER_FREEZE=True
+export REFERENCE_FRAME=first
+export GEOMETRY_DIRECT_TOKEN_MODE=special17
+export GEOMETRY_TOKEN_INSERT_POSITION=front
+export DISTILL_WEIGHT="${DISTILL_WEIGHT:-0.05}"
+export FEATURE_FUSION_METHOD=none
 export GEOMETRY_ENCODER_LAYERS=""
-
+export GEOMETRY_FUSION_LAYERS=""
+export VISION_LANGUAGE_FUSION_LAYERS=""
 export DATA_FLATTEN=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/vggt-direct-scene}"
-export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
+export TUNE_MM_LLM=True
+export TUNE_MM_MLP=False
+export TUNE_MM_VISION=False
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage1}"
+export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
+
 export WANDB_PROJECT="SceneDistill"
 export WANDB_MODE="online"
 export WANDB_LOCAL_ROOT="${TMPDIR:-/tmp}/SceneDistill-wandb"
@@ -66,4 +66,7 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-bash "${SCRIPT_DIR}/train.sh"
+export NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
+export MASTER_PORT="${MASTER_PORT:-29500}"
+
+bash "${SCRIPT_DIR}/train_multinode.sh"

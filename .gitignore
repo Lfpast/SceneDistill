@@ -4,6 +4,8 @@ SpatialStack_temp/
 /SpatialStack/scripts/evaluation/*
 !/SpatialStack/scripts/train/train.sh
 !/SpatialStack/scripts/train/train_scene_distill.sh
+!/SpatialStack/scripts/train/train_multinode.sh
+!/SpatialStack/scripts/train/train_scene_distill_multinode.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_scene_distill.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_vggt_direct.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_vgllm_add.sh

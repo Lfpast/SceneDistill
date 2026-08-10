@@ -40,13 +40,13 @@ source activate base
 conda activate spatialstack
 cd "${PROJECT_ROOT}"
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT="${PROJECT_ROOT}"
+export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
-export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
+export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 
 export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
 
