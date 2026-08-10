@@ -2,19 +2,19 @@
 #SBATCH --job-name=SceneDistill-multinode
 #SBATCH --partition=normal
 #SBATCH --account=peilab
-#SBATCH --nodes=2
-#SBATCH --gpus-per-node=8
+#SBATCH --nodes=3
+#SBATCH --gpus-per-node=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
 #SBATCH --output=slurm_logs/SceneDistill-multinode-%j.out
 #SBATCH --error=slurm_logs/SceneDistill-multinode-%j.err
 # ============================================================================
-# SceneDistill multi-node training (default: 2 nodes x 8 GPUs).
+# SceneDistill multi-node training (default: 3 nodes x 2 GPUs).
 # Submit from SpatialStack with:
 #   sbatch scripts/train/train_scene_distill_multinode.sh
-# Override requested nodes at submission time, for example:
-#   sbatch --nodes=4 scripts/train/train_scene_distill_multinode.sh
-# Keep NPROC_PER_NODE equal to the #SBATCH --gpus-per-node value.
+# Override requested resources at submission time, for example:
+#   sbatch --nodes=4 --gpus-per-node=2 scripts/train/train_scene_distill_multinode.sh
+# NPROC_PER_NODE is derived from the GPUs allocated by Slurm.
 # ============================================================================
 set -euo pipefail
 
@@ -66,7 +66,6 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-export NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 export MASTER_PORT="${MASTER_PORT:-29500}"
 
 bash "${SCRIPT_DIR}/train_multinode.sh"
