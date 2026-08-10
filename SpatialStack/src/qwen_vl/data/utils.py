@@ -15,6 +15,7 @@ GEOMETRY_ENCODER_PATCH_SIZES = {
     "vggt": 14,
     "vggt_omega": 16,
     "vggt_omega_direct": 16,
+    "scene_distill": 16,
 }
 
 

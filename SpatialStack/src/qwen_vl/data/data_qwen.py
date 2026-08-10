@@ -52,7 +52,7 @@ local_rank = None
 
 def _estimated_qwen3_5_visual_tokens_per_image(geometry_encoder_type: str = "vggt") -> int:
     base_tokens = 252
-    if geometry_encoder_type == "vggt_omega_direct":
+    if geometry_encoder_type in {"vggt_omega_direct", "scene_distill"}:
         return base_tokens + 17
     return base_tokens
 

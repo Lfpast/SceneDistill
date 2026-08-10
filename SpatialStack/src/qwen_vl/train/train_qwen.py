@@ -60,6 +60,13 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
     if trainer.deepspeed:
         torch.cuda.synchronize()
+        if getattr(trainer.model.config, "geometry_encoder_type", None) == "scene_distill":
+            from qwen_vl.model.scene_distill_module import remove_teacher_weights
+
+            state_dict = trainer.accelerator.get_state_dict(trainer.deepspeed)
+            state_dict = remove_teacher_weights(state_dict)
+            trainer._save(output_dir, state_dict=state_dict)
+            return
         trainer.save_model(output_dir)
         return
 
@@ -114,6 +121,15 @@ def set_model(model_args, model):
         # vggt is frozen
         for n, p in model.geometry_encoder.named_parameters():
             p.requires_grad = False
+
+        if model_args.geometry_encoder_type == "scene_distill":
+            scene_distill_module = getattr(getattr(model, "model", None), "scene_distill_module", None)
+            if scene_distill_module is None:
+                raise RuntimeError("SceneDistill model did not initialize scene_distill_module.")
+            for parameter in scene_distill_module.parameters():
+                parameter.requires_grad = True
+            if any(parameter.requires_grad for parameter in model.geometry_encoder.parameters()):
+                raise RuntimeError("SceneDistill requires every VGGT-Omega teacher parameter to stay frozen.")
 
 
 def configure_warmup_steps(training_args, train_dataset):
@@ -238,7 +254,13 @@ def train(attn_implementation="flash_attention_2"):
         from transformers import Qwen3_5ForConditionalGeneration
 
         if model_args.use_geometry_encoder:
-            if model_args.geometry_encoder_type == "vggt_omega_direct":
+            if model_args.geometry_encoder_type == "scene_distill":
+                from qwen_vl.model.modeling_qwen3_5_scene_distill import (
+                    Qwen3_5ForConditionalGenerationWithSceneDistill,
+                )
+
+                qwen35_cls = Qwen3_5ForConditionalGenerationWithSceneDistill
+            elif model_args.geometry_encoder_type == "vggt_omega_direct":
                 from qwen_vl.model.modeling_qwen3_5_vggt_omega_direct import (
                     Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect,
                 )
@@ -253,6 +275,7 @@ def train(attn_implementation="flash_attention_2"):
                 "use_geometry_encoder",
                 "geometry_encoder_type",
                 "geometry_encoder_path",
+                "geometry_encoder_freeze",
                 "reference_frame",
                 "feature_fusion_method",
                 "fusion_num_layers",
@@ -328,6 +351,18 @@ def train(attn_implementation="flash_attention_2"):
         visual_module, _, language_module, _ = resolve_model_modules(model)
         visual_module.print_trainable_parameters()
         language_module.print_trainable_parameters()
+        if model_args.geometry_encoder_type == "scene_distill":
+            scene_distill_module = model.model.scene_distill_module
+            trainable_student = sum(
+                parameter.numel() for parameter in scene_distill_module.parameters() if parameter.requires_grad
+            )
+            trainable_teacher = sum(
+                parameter.numel() for parameter in model.geometry_encoder.parameters() if parameter.requires_grad
+            )
+            print(
+                "SceneDistill parameters: "
+                f"student_trainable={trainable_student}, teacher_trainable={trainable_teacher}"
+            )
 
     print(model.config)
     if model_args.use_geometry_encoder:

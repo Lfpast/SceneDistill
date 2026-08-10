@@ -2,7 +2,7 @@
 
 All commands run from `SpatialStack/` under `conda activate cm`.
 
-## 7 种训练方案
+## 8 种训练方案
 
 ```bash
 bash scripts/train/train_pure.sh                  # 纯 Qwen3.5 SFT
@@ -12,6 +12,7 @@ bash scripts/train/train_vgllm.sh                 # VGGT-1B + post-merger add (V
 bash scripts/train/train_vgllm_omega.sh           # 同上, 编码器换 VGGT-Omega
 bash scripts/train/train_vggt_direct.sh           # VGGT-Omega, 每帧前拼 17 token (1 cam + 16 reg)
 bash scripts/train/train_vggt_direct_scene.sh     # VGGT-Omega, 每帧前拼 16 register token
+bash scripts/train/train_scene_distill.sh         # 4-stage GCTE, 在线蒸馏 1 camera + 16 scene tokens
 ```
 
 首次跑会自动下载 Qwen3.5-4B (~8GB) + VGGT-1B / VGGT-Omega (~2-3GB) 到 `$HF_HOME/hub`,之后命中缓存不再下。
@@ -66,6 +67,10 @@ GEOMETRY_DIRECT_TOKEN_MODE=special17 bash scripts/train/train_vggt_direct.sh
 # 换插入位置: front | back
 GEOMETRY_TOKEN_INSERT_POSITION=back bash scripts/train/train_vggt_direct.sh
 ```
+
+`train_scene_distill.sh` 是独立架构路径，固定使用 Qwen Vision 第 `1/5/9/13` 层、
+`special17`、首帧参考系、front insertion 和 `0.05` 蒸馏权重；不要通过上述 direct
+injection 参数改写这些约束。
 
 ## 限定 GPU
 

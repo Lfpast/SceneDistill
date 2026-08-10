@@ -44,6 +44,7 @@ from .position_utils import get_2d_sincos_pos_embed
 GEOMETRY_STATE_KEYWORDS = (
     "geometry_encoder",
     "direct_projector",
+    "scene_distill_module",
     "language_feature_fusion",
     "feature_fusion",
     "geometry_merger",

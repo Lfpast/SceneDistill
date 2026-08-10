@@ -213,6 +213,31 @@ Phase2 direct-injection notes:
 - The inserted special tokens use a single `frame_top_left` MRoPE expansion rule in this branch.
 - Evaluation and inference must keep using the multi-image path for videos; do not switch this branch to Qwen's native video-token path.
 
+SceneDistill stage-1 token distillation is a separate path from both Phase1 fusion and
+`vggt_omega_direct`:
+
+```bash
+bash scripts/train/train_scene_distill.sh
+```
+
+This path fixes the architecture contract instead of exposing it as an ablation surface:
+
+- Qwen3.5 vision blocks `1, 5, 9, 13` provide raw pre-merger K/V tokens.
+- Each frame owns `1 camera + 16 scene` student tokens; the first frame uses the reference-token variant.
+- Four GCTE stages alternate frame-wise cross-attention and video-isolated global special-token self-attention.
+- Frozen VGGT-Omega `special17` tokens from aggregator layer 24 are online teacher targets.
+- The index-aligned cosine losses are summed over 17 tokens, averaged over frames, weighted by `0.05`, and added to SFT loss.
+- The projected 17 student tokens are always prepended to each frame's merged Qwen visual tokens.
+- Training uses ordered multi-image frames. Native Qwen video-token inputs, back insertion, and non-first reference frames are rejected.
+
+Evaluate a trained checkpoint with:
+
+```bash
+MODEL_PATH=./output/SceneDistill-stage1 \
+GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
+bash scripts/evaluation/eval_qwen35_scene_distill.sh
+```
+
 Three Omega comparison presets are now available in the Qwen3.5 codepath:
 
 1. SpatialStack layered fusion:

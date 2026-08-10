@@ -180,7 +180,13 @@ class Qwen3_5(lmms):
         geometry_encoder_path = geometry_encoder_path or getattr(config, "geometry_encoder_path", None)
         if use_geometry_model:
             geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
-            if geometry_encoder_type == "vggt_omega_direct":
+            if geometry_encoder_type == "scene_distill":
+                from qwen_vl.model.modeling_qwen3_5_scene_distill import (
+                    Qwen3_5ForConditionalGenerationWithSceneDistill,
+                )
+
+                load_class = Qwen3_5ForConditionalGenerationWithSceneDistill
+            elif geometry_encoder_type == "vggt_omega_direct":
                 from qwen_vl.model.modeling_qwen3_5_vggt_omega_direct import (
                     Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect,
                 )

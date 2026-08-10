@@ -181,6 +181,12 @@ def resolve_model_class(model_family: str, use_geometry_model: bool, geometry_en
                 f"Please install transformers>={MIN_QWEN3_5_TRANSFORMERS_VERSION}."
             ) from exc
         if use_geometry_model:
+            if geometry_encoder_type == "scene_distill":
+                from qwen_vl.model.modeling_qwen3_5_scene_distill import (
+                    Qwen3_5ForConditionalGenerationWithSceneDistill,
+                )
+
+                return Qwen3_5ForConditionalGenerationWithSceneDistill
             if geometry_encoder_type == "vggt_omega_direct":
                 from qwen_vl.model.modeling_qwen3_5_vggt_omega_direct import (
                     Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect,
