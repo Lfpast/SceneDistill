@@ -65,4 +65,4 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-bash "${SCRIPT_DIR}/train.sh"
+bash "/home/yjiaag/SceneDistill/SpatialStack/scripts/train/train.sh"

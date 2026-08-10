@@ -68,4 +68,4 @@ export WANDB_DISABLE_CODE="true"
 
 export MASTER_PORT="${MASTER_PORT:-29500}"
 
-bash "${SCRIPT_DIR}/train_multinode.sh"
+bash "/home/yjiaag/SceneDistill/SpatialStack/scripts/train/train_multinode.sh"
