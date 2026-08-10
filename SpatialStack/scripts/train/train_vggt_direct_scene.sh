@@ -53,7 +53,7 @@ export GEOMETRY_FUSION_LAYERS=""
 export GEOMETRY_ENCODER_LAYERS=""
 
 export DATA_FLATTEN=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen3_5_output/vggt-direct-scene}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/vggt-direct-scene}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE:-/project/peilab/jys/spatialstack_store/hf_cache/hub}}"
 export WANDB_PROJECT="SceneDistill"
 export WANDB_MODE="online"

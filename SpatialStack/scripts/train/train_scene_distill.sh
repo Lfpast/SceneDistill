@@ -6,7 +6,14 @@
 #SBATCH --time=12:00:00
 #SBATCH --account=peilab
 #SBATCH --output=slurm_logs/SceneDistill.out
-
+# ============================================================================
+# SceneDistill (spetial17 变体): 把 VGGT-Omega 的 17 个 camera + scene token
+# 拼到每帧 visual span 前并蒸馏.
+# 蒸馏机制是 Frame-wise Cross-attention + Global Camera/Scene Self-attention
+# ----------------------------------------------------------------------------
+# 用法:
+#   bash scripts/train/train_vggt_direct_scene.sh
+# ============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
