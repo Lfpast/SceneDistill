@@ -10,17 +10,17 @@
 
 整体数据流为：
 
-\[
+$$
 \text{Qwen Vision blocks }[1,5,9,13]
 \rightarrow 4\times(\text{Frame Cross-Attn}\rightarrow\text{Global Camera-Scene Self-Attn})
-\]
+$$
 
-\[
+$$
 Z=\operatorname{Concat}(Z_{\text{frame}}^{(4)},Z_{\text{global}}^{(4)})
 \in \mathbb{R}^{T\times17\times2048}
-\]
+$$
 
-\[
+$$
 L_{\text{total}}
 =
 L_{\text{SFT}}
@@ -30,7 +30,7 @@ L_{\text{SFT}}
 \sum_{f=1}^{T}
 \sum_{i=1}^{17}
 \left(1-\cos(Z_{f,i},Y_{f,i})\right)
-\]
+$$
 
 其中 `Y` 是在线、冻结的 VGGT-Omega 最后一层 17 个 special tokens。
 
