@@ -69,4 +69,4 @@ export WANDB_DISABLE_CODE="true"
 export NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 export MASTER_PORT="${MASTER_PORT:-29500}"
 
-bash "${SCRIPT_DIR}/train_multinode.sh"
+bash "/home/yjiaag/SceneDistill/SpatialStack/scripts/train/train_multinode.sh"
