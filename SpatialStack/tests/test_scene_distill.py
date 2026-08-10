@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -459,6 +460,64 @@ def _import_qwen35_module_or_skip(module_name):
         return __import__(module_name, fromlist=["*"])
     except ImportError as error:
         pytest.skip(f"Qwen3.5 Transformers runtime is unavailable: {error}")
+
+
+def test_stage1_scene_distill_state_key_mapping():
+    scene_distill_modeling = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_scene_distill"
+    )
+    mapping = scene_distill_modeling.map_stage1_scene_distill_state_key
+
+    assert mapping("model.scene_distill_module.camera_token") == (
+        "model.scene_distill_pre_module.pre_camera_token"
+    )
+    assert mapping("model.scene_distill_module.scene_token") == (
+        "model.scene_distill_pre_module.pre_scene_token"
+    )
+    assert mapping("model.scene_distill_module.frame_layers.0.q_proj.weight") == (
+        "model.scene_distill_pre_module.pre_frame_layers.0.q_proj.weight"
+    )
+    assert mapping("model.scene_distill_module.global_layers.3.qkv.bias") == (
+        "model.scene_distill_pre_module.pre_global_layers.3.qkv.bias"
+    )
+    assert mapping("model.scene_distill_module.projector.linear_fc2.weight") == (
+        "model.scene_distill_pre_module.pre_projector.linear_fc2.weight"
+    )
+
+
+def test_stage1_scene_distill_sharded_checkpoint_mapping(tmp_path):
+    modeling_qwen3_5 = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5"
+    )
+    scene_distill_modeling = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_scene_distill"
+    )
+
+    model = nn.Module()
+    model.model = nn.Module()
+    model.model.scene_distill_pre_module = nn.Module()
+    model.model.scene_distill_pre_module.pre_camera_token = nn.Parameter(torch.zeros(2))
+
+    legacy_key = "model.scene_distill_module.camera_token"
+    shard_name = "pytorch_model-00001-of-00001.bin"
+    torch.save({legacy_key: torch.tensor([2.0, 3.0])}, tmp_path / shard_name)
+    (tmp_path / "pytorch_model.bin.index.json").write_text(
+        json.dumps({"weight_map": {legacy_key: shard_name}}),
+        encoding="utf-8",
+    )
+
+    loaded_keys = modeling_qwen3_5._load_qwen3_5_geometry_submodules(
+        model,
+        str(tmp_path),
+        state_keywords=(scene_distill_modeling.STAGE1_SCENE_DISTILL_STATE_KEYWORD,),
+        key_mapper=scene_distill_modeling.map_stage1_scene_distill_state_key,
+    )
+
+    assert loaded_keys == 1
+    torch.testing.assert_close(
+        model.model.scene_distill_pre_module.pre_camera_token,
+        torch.tensor([2.0, 3.0]),
+    )
 
 
 def test_selective_llm_capture_is_masked_post_layer_and_pre_norm(monkeypatch):
