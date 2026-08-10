@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=SceneDistill
+#SBATCH --job-name=SceneDistill-02
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
-#SBATCH --time=12:00:00
+#SBATCH --time=14:00:00
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/SceneDistill-stage1.out
+#SBATCH --output=slurm_logs/SceneDistill-02.out
 # ============================================================================
 # SceneDistill (spetial17 变体): 把 VGGT-Omega 的 17 个 camera + scene token
 # 拼到每帧 visual span 前并蒸馏.
@@ -23,14 +23,14 @@ module load slurm
 module load cuda12.2/toolkit/12.2.2
 source activate spatialstack
 cd "${PROJECT_ROOT}"
-export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT="${PROJECT_ROOT}"
+export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
+export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
-export LD_PRELOAD=/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
-export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
+export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 
 export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
 export USE_GEOMETRY_ENCODER=True
@@ -40,7 +40,7 @@ export GEOMETRY_ENCODER_FREEZE=True
 export REFERENCE_FRAME=first
 export GEOMETRY_DIRECT_TOKEN_MODE=special17
 export GEOMETRY_TOKEN_INSERT_POSITION=front
-export DISTILL_WEIGHT="${DISTILL_WEIGHT:-0.05}"
+export DISTILL_WEIGHT="${DISTILL_WEIGHT:-0.2}"
 export FEATURE_FUSION_METHOD=none
 export GEOMETRY_ENCODER_LAYERS=""
 export GEOMETRY_FUSION_LAYERS=""
@@ -49,7 +49,7 @@ export DATA_FLATTEN=False
 export TUNE_MM_LLM=True
 export TUNE_MM_MLP=False
 export TUNE_MM_VISION=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage1}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-02}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
 
 export WANDB_PROJECT="SceneDistill"
@@ -63,4 +63,4 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-bash "${SCRIPT_DIR}/train.sh"
+bash "/home/yjiaag/SceneDistill/SpatialStack/scripts/train/train.sh"
