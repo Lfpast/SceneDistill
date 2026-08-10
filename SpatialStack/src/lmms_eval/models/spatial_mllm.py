@@ -218,12 +218,12 @@ def _move_inputs_to_device(inputs: dict, device) -> dict:
     return inputs
 
 
-def _get_spatialstack_omega_root() -> Path:
+def _get_scene_distill_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
 def _get_default_spatial_mllm_repo_path() -> Path:
-    return _get_spatialstack_omega_root().parent / SPATIAL_MLLM_REPO_NAME
+    return _get_scene_distill_root().parent / SPATIAL_MLLM_REPO_NAME
 
 
 def _resolve_spatial_mllm_repo_path(spatial_mllm_repo_path: Optional[str]) -> Path:
@@ -234,9 +234,9 @@ def _resolve_spatial_mllm_repo_path(spatial_mllm_repo_path: Optional[str]) -> Pa
     if candidate.is_absolute():
         return candidate
 
-    # Interpret relative paths against the SpatialStack-omega parent directory,
+    # Interpret relative paths against the SceneDistill parent directory,
     # so `Spatial-MLLM` resolves to a sibling checkout on local and remote hosts.
-    return _get_spatialstack_omega_root().parent / candidate
+    return _get_scene_distill_root().parent / candidate
 
 
 def _import_spatial_mllm_modules(spatial_mllm_repo_path: Optional[str]):

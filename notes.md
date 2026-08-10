@@ -6,9 +6,9 @@ srun --job-name=l1 --nodes=1 --gpus=2 --time=8:00:00 --partition=normal --accoun
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 conda activate spatialstack
-cd /home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
+cd /home/dduab/jiayusheng/SceneDistill/SpatialStack
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/dduab/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT=/home/dduab/jiayusheng/SpatialStack-omega/SpatialStack
+export REPO_ROOT=/home/dduab/jiayusheng/SceneDistill/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
@@ -23,9 +23,9 @@ srun --job-name=qwen35 --nodes=1 --gpus=8 --time=8:00:00 --partition=normal --ac
 module load slurm
 module load cuda12.2/toolkit/12.2.2
 conda activate spatialstack
-cd /home/yjiaag/SpatialStack-omega/SpatialStack
+cd /home/yjiaag/SceneDistill/SpatialStack
 export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT=/home/yjiaag/SpatialStack-omega/SpatialStack
+export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
 export SS_ROOT=/project/peilab/jys/spatialstack_store
 export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub

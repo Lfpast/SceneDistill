@@ -227,7 +227,7 @@ export HF_HOME=$SS_ROOT/hf_cache
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export HF_XET_HIGH_PERFORMANCE=1
 export PROBING_DATA=/project/peilab/jys/probing_data
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 cd /tmp
 
 python download.py \
@@ -400,7 +400,7 @@ CUDA_VISIBLE_DEVICES=0 python -m features.run_scannet \
 ### Qwen 3.5
 
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/qwen3.5-4b-visual \
@@ -414,7 +414,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   callbacks.model_checkpoint.save_top_k=0
 
 # Evaluation
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 ROOT=/project/peilab/jys/probing/DL3DV/qwen3.5-4b-visual
 export PROBING_DATA=/project/peilab/jys/probing_data
 TRAIN_RUN=Layer32
@@ -437,7 +437,7 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
 ### VGGT-Omega
 
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/vggt-omega \
@@ -471,7 +471,7 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
 
 ### SpatialStack
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=dl3dv/spatialstack \
@@ -507,7 +507,7 @@ CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
 
 ### Qwen 3.5
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/qwen3.5-4b \
@@ -527,7 +527,7 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
 
 ### Qwen 3.5-Visual
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/qwen3.5-4b-visual \
@@ -546,7 +546,7 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
 
 ### VGGT-Omega
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0 python -m probing_vlm_vgm.train \
   experiment=scannet_tagging/vggt-omega \
@@ -584,7 +584,7 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0 bash scripts/eval_scannet_tagging.sh \
 
 ### Qwen 3.5
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/qwen3.5-4b \
@@ -609,7 +609,7 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
 
 ### VGGT-Omega
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/vggt-omega \
@@ -634,7 +634,7 @@ WANDB_MODE=offline CUDA_VISIBLE_DEVICES=0,1 python scripts/eval_scannet_instance
 
 ### Qwen 3.5-Visual
 ```bash
-cd ~/jiayusheng/SpatialStack-omega/Probing-VLM-VGM
+cd ~/jiayusheng/Probing-VLM-VGM
 
 CUDA_VISIBLE_DEVICES=0,1 python -m probing_vlm_vgm.train \
   experiment=scannet/qwen3.5-4b-visual \
