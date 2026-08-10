@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:8
 #SBATCH --time=12:00:00
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/SceneDistill.out
+#SBATCH --output=slurm_logs/SceneDistill-stage1.out
 # ============================================================================
 # SceneDistill (spetial17 变体): 把 VGGT-Omega 的 17 个 camera + scene token
 # 拼到每帧 visual span 前并蒸馏.

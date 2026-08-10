@@ -1,8 +1,8 @@
 SpatialStack_temp/
 .agents/
 .codex/
-/SpatialStack/scripts/train/*
 /SpatialStack/scripts/evaluation/*
+!/SpatialStack/scripts/train/train.sh
 !/SpatialStack/scripts/train/train_scene_distill.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_scene_distill.sh
 !/SpatialStack/scripts/evaluation/eval_qwen35_vggt_direct.sh
