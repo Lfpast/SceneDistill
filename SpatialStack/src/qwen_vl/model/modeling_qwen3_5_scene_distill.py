@@ -20,12 +20,16 @@ from .modeling_qwen3_5 import (
     align_qwen3_5_geometry_modules,
 )
 from .scene_distill_module import (
-    DISTILL_WEIGHT,
+    LLM_BLOCK_INDICES,
     NUM_SPECIAL_TOKENS,
-    SceneDistillModule,
+    POST_DISTILL_DEPTH,
+    POST_DISTILL_WEIGHT,
+    PRE_DISTILL_WEIGHT,
+    SceneDistillPostModule,
+    SceneDistillPreModule,
     remove_teacher_weights,
     scene_distillation_loss,
-    select_vision_layer_outputs,
+    select_pre_vision_layer_outputs,
 )
 from .vggt_omega_direct_packing import (
     build_direct_only_mask,
@@ -50,16 +54,25 @@ def align_qwen3_5_scene_distill_modules(model):
 
     reference_tensor = getattr(getattr(model, "lm_head", None), "weight", None)
     if reference_tensor is not None and reference_tensor.device.type != "meta":
-        scene_distill_module = getattr(inner_model, "scene_distill_module", None)
-        if scene_distill_module is not None:
-            scene_distill_module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
+        for module_name in ("scene_distill_pre_module", "scene_distill_post_module"):
+            module = getattr(inner_model, module_name, None)
+            if module is not None:
+                module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
     return model
 
 
 class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
     def __init__(self, config):
-        self.scene_distill_module = None
-        self._last_scene_distill_loss = None
+        if hasattr(config, "distill_weight"):
+            delattr(config, "distill_weight")
+        if not hasattr(config, "pre_distill_weight"):
+            config.pre_distill_weight = PRE_DISTILL_WEIGHT
+        if not hasattr(config, "post_distill_weight"):
+            config.post_distill_weight = POST_DISTILL_WEIGHT
+        self.scene_distill_pre_module = None
+        self.scene_distill_post_module = None
+        self._last_pre_distill_loss = None
+        self._last_post_distill_loss = None
         super().__init__(config)
 
     def _is_scene_distill(self) -> bool:
@@ -78,8 +91,15 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             raise ValueError("SceneDistill requires reference_frame='first'.")
         if not getattr(config, "geometry_encoder_freeze", True):
             raise ValueError("SceneDistill requires a frozen VGGT-Omega teacher.")
-        if float(getattr(config, "distill_weight", DISTILL_WEIGHT)) < 0:
-            raise ValueError("SceneDistill distill_weight must be non-negative.")
+        if float(getattr(config, "pre_distill_weight", PRE_DISTILL_WEIGHT)) < 0:
+            raise ValueError("SceneDistill pre_distill_weight must be non-negative.")
+        if float(getattr(config, "post_distill_weight", POST_DISTILL_WEIGHT)) < 0:
+            raise ValueError("SceneDistill post_distill_weight must be non-negative.")
+        if int(config.text_config.num_hidden_layers) <= max(LLM_BLOCK_INDICES):
+            raise ValueError(
+                "SceneDistill Post requires text_config.num_hidden_layers > "
+                f"{max(LLM_BLOCK_INDICES)}, got {config.text_config.num_hidden_layers}."
+            )
 
     def initialize_geometry_modules(self):
         if self._geometry_modules_initialized:
@@ -104,9 +124,15 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             freeze_encoder=encoder_config.freeze_encoder,
             **encoder_config.encoder_kwargs,
         )
-        self.scene_distill_module = SceneDistillModule(
+        self.scene_distill_pre_module = SceneDistillPreModule(
             visual_dim=int(config.vision_config.hidden_size),
             text_hidden_dim=int(config.text_config.hidden_size),
+        )
+        self.scene_distill_post_module = SceneDistillPostModule(
+            special_dim=1024,
+            llm_hidden_dim=int(config.text_config.hidden_size),
+            num_heads=16,
+            depth=POST_DISTILL_DEPTH,
         )
         self._geometry_modules_initialized = True
 
@@ -117,9 +143,11 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
                 reference_tensor = next(self.language_model.parameters())
             except StopIteration:
                 return
-        if reference_tensor.device.type == "meta" or self.scene_distill_module is None:
+        if reference_tensor.device.type == "meta":
             return
-        self.scene_distill_module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
+        for module in (self.scene_distill_pre_module, self.scene_distill_post_module):
+            if module is not None:
+                module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
 
     @staticmethod
     def _video_sizes(geometry_encoder_inputs: List[torch.Tensor]) -> List[int]:
@@ -148,6 +176,36 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             for t, h, w in image_grid_thw.tolist()
         ]
 
+    @staticmethod
+    def _validate_expanded_image_spans(
+        image_mask_2d: torch.Tensor,
+        direct_only_mask: torch.Tensor,
+        llm_frame_sizes: List[int],
+    ) -> None:
+        expected_total = sum(llm_frame_sizes)
+        actual_total = int(image_mask_2d.sum().item())
+        if actual_total != expected_total:
+            raise ValueError(
+                f"SceneDistill expanded image mask contains {actual_total} tokens, expected {expected_total}."
+            )
+        if int(direct_only_mask.sum().item()) != len(llm_frame_sizes) * NUM_SPECIAL_TOKENS:
+            raise ValueError(
+                "SceneDistill direct-only mask must contain exactly "
+                f"{NUM_SPECIAL_TOKENS} positions per frame."
+            )
+
+        direct_flags = direct_only_mask[image_mask_2d]
+        for frame_index, frame_flags in enumerate(torch.split(direct_flags, llm_frame_sizes)):
+            expected_flags = torch.arange(
+                frame_flags.shape[0],
+                device=frame_flags.device,
+            ) < NUM_SPECIAL_TOKENS
+            if not torch.equal(frame_flags, expected_flags):
+                raise ValueError(
+                    f"SceneDistill frame {frame_index} image span must start with exactly "
+                    f"{NUM_SPECIAL_TOKENS} direct positions."
+                )
+
     def _collect_teacher_features(
         self,
         geometry_encoder_inputs: List[torch.Tensor],
@@ -172,10 +230,12 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
         mm_token_type_ids: torch.IntTensor | None = None,
         cache_position: torch.LongTensor | None = None,
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
-        compute_scene_distill_loss: bool = False,
+        compute_pre_distill_loss: bool = False,
+        compute_post_distill_loss: bool = False,
         **kwargs,
     ) -> Qwen3_5ModelOutputWithPast:
-        self._last_scene_distill_loss = None
+        self._last_pre_distill_loss = None
+        self._last_post_distill_loss = None
         scene_distill_active = (
             self._is_scene_distill()
             and pixel_values is not None
@@ -211,7 +271,11 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             raise ValueError("SceneDistill requires geometry_encoder_inputs for frame grouping and teacher targets.")
 
         inputs_embeds = self.get_input_embeddings()(input_ids)
-        if self.geometry_encoder is None or self.scene_distill_module is None:
+        if (
+            self.geometry_encoder is None
+            or self.scene_distill_pre_module is None
+            or self.scene_distill_post_module is None
+        ):
             self.initialize_geometry_modules()
         self.align_geometry_modules(inputs_embeds)
 
@@ -230,19 +294,21 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             output_hidden_states=True,
         )
         vision_hidden_states = getattr(image_outputs, "hidden_states", None)
-        visual_layer_outputs = select_vision_layer_outputs(vision_hidden_states)
+        visual_layer_outputs = select_pre_vision_layer_outputs(vision_hidden_states)
 
-        student_embeds, student_features = self.scene_distill_module(
+        pre_embeds, pre_features, pre_global_tokens = self.scene_distill_pre_module(
             visual_layer_outputs,
             frame_sizes=frame_sizes,
             video_sizes=video_sizes,
         )
-        if compute_scene_distill_loss:
+        teacher_features = None
+        if compute_pre_distill_loss or compute_post_distill_loss:
             teacher_features = self._collect_teacher_features(
                 geometry_encoder_inputs,
-                target_device=student_features.device,
+                target_device=pre_features.device,
             )
-            self._last_scene_distill_loss = scene_distillation_loss(student_features, teacher_features)
+        if compute_pre_distill_loss:
+            self._last_pre_distill_loss = scene_distillation_loss(pre_features, teacher_features)
 
         pooler_output = image_outputs.pooler_output
         image_embeds = (
@@ -251,14 +317,14 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             else torch.cat(list(pooler_output), dim=0)
         )
         image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
-        student_embeds = student_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        pre_embeds = pre_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
         merged_frame_sizes = self._merged_frame_sizes(
             image_grid_thw,
             spatial_merge_size=int(getattr(self.config.vision_config, "spatial_merge_size", 2)),
         )
         image_embeds_expanded = expand_image_embeds_with_direct_tokens(
             image_embeds,
-            student_embeds,
+            pre_embeds,
             merged_frame_sizes,
             insert_position="front",
         )
@@ -302,10 +368,17 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             image_features=image_embeds_expanded,
         )
         expanded_inputs_embeds = expanded_inputs_embeds.masked_scatter(image_mask, image_embeds_expanded)
+        image_mask_2d = image_mask[..., 0]
         self._direct_only_mask = build_direct_only_mask(
-            image_mask[..., 0],
+            image_mask_2d,
             NUM_SPECIAL_TOKENS,
             insert_position="front",
+        )
+        llm_frame_sizes = [NUM_SPECIAL_TOKENS + frame_size for frame_size in merged_frame_sizes]
+        self._validate_expanded_image_spans(
+            image_mask_2d,
+            self._direct_only_mask,
+            llm_frame_sizes,
         )
         self.rope_deltas = compute_mrope_position_deltas(
             new_position_ids,
@@ -320,9 +393,30 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             past_key_values=past_key_values,
             inputs_embeds=expanded_inputs_embeds,
             cache_position=cache_position,
+            capture_hidden_state_layers=LLM_BLOCK_INDICES if compute_post_distill_loss else None,
+            capture_hidden_state_mask=image_mask_2d if compute_post_distill_loss else None,
             **kwargs,
         )
-        return Qwen3_5ModelOutputWithPast(**outputs, rope_deltas=self.rope_deltas)
+        if compute_post_distill_loss:
+            llm_layer_features = outputs.hidden_states
+            if llm_layer_features is None:
+                raise RuntimeError(
+                    f"SceneDistill Post did not receive captured LLM layers {LLM_BLOCK_INDICES}."
+                )
+            post_features = self.scene_distill_post_module(
+                pre_global_tokens,
+                llm_layer_features,
+                frame_sizes=llm_frame_sizes,
+                video_sizes=video_sizes,
+            )
+            self._last_post_distill_loss = scene_distillation_loss(post_features, teacher_features)
+
+        return Qwen3_5ModelOutputWithPast(
+            last_hidden_state=outputs.last_hidden_state,
+            past_key_values=outputs.past_key_values,
+            attentions=outputs.attentions,
+            rope_deltas=self.rope_deltas,
+        )
 
 
 class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGenerationWithGeometry):
@@ -336,8 +430,12 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         self.geometry_merger_list = self.model.geometry_merger_list
         self.lm_head = nn.Linear(config.text_config.hidden_size, config.text_config.vocab_size, bias=False)
         self.post_init()
-        if self.model.scene_distill_module is not None:
-            self.model.scene_distill_module.reset_parameters()
+        for module in (
+            self.model.scene_distill_pre_module,
+            self.model.scene_distill_post_module,
+        ):
+            if module is not None:
+                module.reset_parameters()
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
@@ -349,7 +447,7 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
             if loaded_keys == 0:
                 raise RuntimeError(
                     "SceneDistill checkpoint declares the SceneDistill architecture but contains no "
-                    "scene_distill_module weights."
+                    "scene_distill_pre_module or scene_distill_post_module weights."
                 )
         return align_qwen3_5_scene_distill_modules(model)
 
@@ -394,7 +492,15 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
                 insert_position="front",
             )
 
-        compute_scene_distill_loss = bool(self.training and labels is not None and scene_distill_active)
+        pre_distill_weight = float(
+            getattr(self.config, "pre_distill_weight", PRE_DISTILL_WEIGHT)
+        )
+        post_distill_weight = float(
+            getattr(self.config, "post_distill_weight", POST_DISTILL_WEIGHT)
+        )
+        compute_distillation = bool(self.training and labels is not None and scene_distill_active)
+        compute_pre_distill_loss = compute_distillation and pre_distill_weight > 0
+        compute_post_distill_loss = compute_distillation and post_distill_weight > 0
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -408,7 +514,8 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
             mm_token_type_ids=mm_token_type_ids,
             cache_position=cache_position,
             geometry_encoder_inputs=geometry_encoder_inputs,
-            compute_scene_distill_loss=compute_scene_distill_loss,
+            compute_pre_distill_loss=compute_pre_distill_loss,
+            compute_post_distill_loss=compute_post_distill_loss,
             **kwargs,
         )
 
@@ -424,13 +531,18 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
                 vocab_size=self.config.text_config.vocab_size,
             )
 
-        distill_loss = self.model._last_scene_distill_loss
-        self.model._last_scene_distill_loss = None
-        if compute_scene_distill_loss:
-            if loss is None or distill_loss is None:
-                raise RuntimeError("SceneDistill training requires both SFT and distillation losses.")
-            distill_weight = float(getattr(self.config, "distill_weight", DISTILL_WEIGHT))
-            loss = loss + distill_weight * distill_loss
+        pre_distill_loss = self.model._last_pre_distill_loss
+        post_distill_loss = self.model._last_post_distill_loss
+        self.model._last_pre_distill_loss = None
+        self.model._last_post_distill_loss = None
+        if compute_pre_distill_loss:
+            if loss is None or pre_distill_loss is None:
+                raise RuntimeError("SceneDistill Pre training requires both SFT and pre distillation losses.")
+            loss = loss + pre_distill_weight * pre_distill_loss
+        if compute_post_distill_loss:
+            if loss is None or post_distill_loss is None:
+                raise RuntimeError("SceneDistill Post training requires both SFT and post distillation losses.")
+            loss = loss + post_distill_weight * post_distill_loss
 
         return Qwen3_5CausalLMOutputWithPast(
             loss=loss,

@@ -12,7 +12,7 @@ bash scripts/train/train_vgllm.sh                 # VGGT-1B + post-merger add (V
 bash scripts/train/train_vgllm_omega.sh           # 同上, 编码器换 VGGT-Omega
 bash scripts/train/train_vggt_direct.sh           # VGGT-Omega, 每帧前拼 17 token (1 cam + 16 reg)
 bash scripts/train/train_vggt_direct_scene.sh     # VGGT-Omega, 每帧前拼 16 register token
-bash scripts/train/train_scene_distill.sh         # 4-stage GCTE, 在线蒸馏 1 camera + 16 scene tokens
+bash scripts/train/train_scene_distill.sh         # 4-stage Pre + 6-stage Post GCTE 双端在线蒸馏
 ```
 
 首次跑会自动下载 Qwen3.5-4B (~8GB) + VGGT-1B / VGGT-Omega (~2-3GB) 到 `$HF_HOME/hub`,之后命中缓存不再下。
@@ -68,11 +68,13 @@ GEOMETRY_DIRECT_TOKEN_MODE=special17 bash scripts/train/train_vggt_direct.sh
 GEOMETRY_TOKEN_INSERT_POSITION=back bash scripts/train/train_vggt_direct.sh
 ```
 
-`train_scene_distill.sh` 是独立架构路径，固定使用 Qwen Vision 第 `1/5/9/13` 层、
-`special17`、首帧参考系和 front insertion。蒸馏权重默认是 `0.05`，可手动覆盖：
+`train_scene_distill.sh` 是独立架构路径：Pre 固定使用 Qwen Vision 第 `1/5/9/13` 层，
+Post 固定捕获 Qwen LLM 第 `5/9/13/17/21/25` 层；两端均使用 `special17`、首帧参考系和 front insertion。Pre/Post 蒸馏权重可独立覆盖：
 
 ```bash
-DISTILL_WEIGHT=0.1 bash scripts/train/train_scene_distill.sh
+PRE_DISTILL_WEIGHT=0.2 \
+POST_DISTILL_WEIGHT=0.05 \
+bash scripts/train/train_scene_distill.sh
 ```
 
 ## 限定 GPU
@@ -134,6 +136,8 @@ GEOMETRY_DIRECT_TOKEN_MODE=camera OUTPUT_DIR=./output/qwen35_vggt_direct_camera 
 | `GEOMETRY_ENCODER_PATH` | `facebook/VGGT-1B` 或 `facebook/VGGT-Omega` | 几何编码器 repo id |
 | `GEOMETRY_DIRECT_TOKEN_MODE` | `special17` | 仅 vggt_direct: camera/scene16/special17 |
 | `GEOMETRY_TOKEN_INSERT_POSITION` | `front` | 仅 vggt_direct: front/back |
+| `PRE_DISTILL_WEIGHT` | `0.05`（SceneDistill 母脚本为 `0.2`） | Pre-LLM 蒸馏权重 |
+| `POST_DISTILL_WEIGHT` | `0.05` | Post-LLM 蒸馏权重 |
 | `OUTPUT_DIR` | `./output/<recipe>` | 最终模型输出目录 |
 | `DATASETS` | 4 dataset 混合 | 训练数据集 |
 | `LR` | `1e-5` | learning rate |

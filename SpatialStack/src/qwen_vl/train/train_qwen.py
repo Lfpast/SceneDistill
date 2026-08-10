@@ -123,11 +123,16 @@ def set_model(model_args, model):
             p.requires_grad = False
 
         if model_args.geometry_encoder_type == "scene_distill":
-            scene_distill_module = getattr(getattr(model, "model", None), "scene_distill_module", None)
-            if scene_distill_module is None:
-                raise RuntimeError("SceneDistill model did not initialize scene_distill_module.")
-            for parameter in scene_distill_module.parameters():
-                parameter.requires_grad = True
+            inner_model = getattr(model, "model", None)
+            scene_distill_pre_module = getattr(inner_model, "scene_distill_pre_module", None)
+            scene_distill_post_module = getattr(inner_model, "scene_distill_post_module", None)
+            if scene_distill_pre_module is None or scene_distill_post_module is None:
+                raise RuntimeError(
+                    "SceneDistill model did not initialize both pre and post modules."
+                )
+            for module in (scene_distill_pre_module, scene_distill_post_module):
+                for parameter in module.parameters():
+                    parameter.requires_grad = True
             if any(parameter.requires_grad for parameter in model.geometry_encoder.parameters()):
                 raise RuntimeError("SceneDistill requires every VGGT-Omega teacher parameter to stay frozen.")
 
@@ -290,7 +295,10 @@ def train(attn_implementation="flash_attention_2"):
             ]:
                 setattr(config, k, getattr(model_args, k))
             if model_args.geometry_encoder_type == "scene_distill":
-                setattr(config, "distill_weight", model_args.distill_weight)
+                if hasattr(config, "distill_weight"):
+                    delattr(config, "distill_weight")
+                setattr(config, "pre_distill_weight", model_args.pre_distill_weight)
+                setattr(config, "post_distill_weight", model_args.post_distill_weight)
 
             assert model_args.geometry_encoder_path is not None, (
                 "geometry_encoder_path must be set in the config when use_geometry_encoder is True."
@@ -354,16 +362,25 @@ def train(attn_implementation="flash_attention_2"):
         visual_module.print_trainable_parameters()
         language_module.print_trainable_parameters()
         if model_args.geometry_encoder_type == "scene_distill":
-            scene_distill_module = model.model.scene_distill_module
-            trainable_student = sum(
-                parameter.numel() for parameter in scene_distill_module.parameters() if parameter.requires_grad
+            scene_distill_pre_module = model.model.scene_distill_pre_module
+            scene_distill_post_module = model.model.scene_distill_post_module
+            trainable_pre = sum(
+                parameter.numel()
+                for parameter in scene_distill_pre_module.parameters()
+                if parameter.requires_grad
+            )
+            trainable_post = sum(
+                parameter.numel()
+                for parameter in scene_distill_post_module.parameters()
+                if parameter.requires_grad
             )
             trainable_teacher = sum(
                 parameter.numel() for parameter in model.geometry_encoder.parameters() if parameter.requires_grad
             )
             print(
                 "SceneDistill parameters: "
-                f"student_trainable={trainable_student}, teacher_trainable={trainable_teacher}"
+                f"pre_trainable={trainable_pre}, post_trainable={trainable_post}, "
+                f"teacher_trainable={trainable_teacher}"
             )
 
     print(model.config)

@@ -36,7 +36,8 @@ set_default_env GEOMETRY_FUSION_LAYERS "0 1 2"
 set_default_env VISION_LANGUAGE_FUSION_LAYERS ""
 set_default_env GEOMETRY_DIRECT_TOKEN_MODE "special17"
 set_default_env GEOMETRY_TOKEN_INSERT_POSITION "front"
-set_default_env DISTILL_WEIGHT "0.05"
+set_default_env PRE_DISTILL_WEIGHT "0.05"
+set_default_env POST_DISTILL_WEIGHT "0.05"
 set_default_env POS_ENCODING_TYPE "none"
 
 set_default_env DATA_FLATTEN "False"
@@ -142,7 +143,8 @@ train_args=(
     --geometry_merger_type "${GEOMETRY_MERGER_TYPE}"
     --geometry_direct_token_mode "${GEOMETRY_DIRECT_TOKEN_MODE}"
     --geometry_token_insert_position "${GEOMETRY_TOKEN_INSERT_POSITION}"
-    --distill_weight "${DISTILL_WEIGHT}"
+    --pre_distill_weight "${PRE_DISTILL_WEIGHT}"
+    --post_distill_weight "${POST_DISTILL_WEIGHT}"
     --pos_encoding_type "${POS_ENCODING_TYPE}"
     --data_flatten "${DATA_FLATTEN}"
     --video_max_frames "${VIDEO_MAX_FRAMES}"
@@ -181,7 +183,7 @@ echo "[INFO] wandb_mode=${WANDB_MODE:-} wandb_dir=${WANDB_DIR:-}"
 echo "[INFO] nproc_per_node=${NPROC_PER_NODE} nnodes=${NNODES} node_rank=${NODE_RANK}"
 echo "[INFO] total_batch_size=${TOTAL_BATCH_SIZE} per_device=${PER_DEVICE_TRAIN_BATCH_SIZE} grad_accum=${GRADIENT_ACCUMULATION_STEPS}"
 echo "[INFO] save_strategy=${SAVE_STRATEGY} final_model_save=true"
-echo "[INFO] geometry=${USE_GEOMETRY_ENCODER} type=${GEOMETRY_ENCODER_TYPE} fusion=${FEATURE_FUSION_METHOD} distill_weight=${DISTILL_WEIGHT}"
+echo "[INFO] geometry=${USE_GEOMETRY_ENCODER} type=${GEOMETRY_ENCODER_TYPE} fusion=${FEATURE_FUSION_METHOD} pre_distill_weight=${PRE_DISTILL_WEIGHT} post_distill_weight=${POST_DISTILL_WEIGHT}"
 
 python -m torch.distributed.run \
     --nproc_per_node "${NPROC_PER_NODE}" \

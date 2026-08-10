@@ -47,6 +47,7 @@ echo "[INFO] slurm_job_id=${SLURM_JOB_ID}"
 echo "[INFO] node_list=${SLURM_JOB_NODELIST}"
 echo "[INFO] master_addr=${MASTER_ADDR} master_port=${MASTER_PORT}"
 echo "[INFO] nnodes=${NNODES} allocated_gpus_per_node=${allocated_gpus_per_node} nproc_per_node=${NPROC_PER_NODE} world_size=$((NNODES * NPROC_PER_NODE))"
+echo "[INFO] pre_distill_weight=${PRE_DISTILL_WEIGHT:-unset} post_distill_weight=${POST_DISTILL_WEIGHT:-unset}"
 
 srun \
     --nodes "${NNODES}" \
@@ -55,6 +56,6 @@ srun \
     --kill-on-bad-exit=1 \
     bash -c '
         export NODE_RANK="${SLURM_PROCID}"
-        echo "[INFO] host=$(hostname) node_rank=${NODE_RANK}/${NNODES} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+        echo "[INFO] host=$(hostname) node_rank=${NODE_RANK}/${NNODES} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset} pre_distill_weight=${PRE_DISTILL_WEIGHT:-unset} post_distill_weight=${POST_DISTILL_WEIGHT:-unset}"
         exec bash "$1"
     ' _ "${SCRIPT_DIR}/train.sh"

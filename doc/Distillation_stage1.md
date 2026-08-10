@@ -66,22 +66,22 @@ $$
 
 不直接修改或替换 `modeling_qwen3_5_vggt_omega_direct.py`，以免改变现有 baseline 的 checkpoint 和推理行为。新 wrapper 以现有 direct wrapper 的初始化、packing 和外层 loss 结构为模板；现有入口及形状处理可参考 [modeling_qwen3_5_vggt_omega_direct.py:53–163](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:53) 和 [modeling_qwen3_5_vggt_omega_direct.py:321–417](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:321)。
 
-`SceneDistillModule` 固定以下结构：
+`SceneDistillPreModule` 固定以下结构：
 
 - `NUM_SCENE_TOKENS = 16`
 - `NUM_SPECIAL_TOKENS = 17`
-- `VISION_BLOCK_INDICES = (0,4,8,12)`
+- `PRE_VISION_BLOCK_INDICES = (0,4,8,12)`
 - `STREAM_DIM = 1024`
 - `FEATURE_DIM = 2048`
 - `NUM_HEADS = 16`
-- `DEPTH = 4`
-- `DISTILL_WEIGHT = 0.05`
+- `PRE_DISTILL_DEPTH = 4`
+- `PRE_DISTILL_WEIGHT = 0.05`
 
 初始化两个参数：
 
 ```text
-camera_token: (1, 2, 1, 1024)
-scene_token:  (1, 2, 16, 1024)
+pre_camera_token: (1, 2, 1, 1024)
+pre_scene_token:  (1, 2, 16, 1024)
 ```
 
 二者均使用 `normal_(std=1e-3)`。每个视频第一帧使用 variant 0，其余帧使用 variant 1；拼接后得到：
@@ -94,7 +94,7 @@ special_tokens: (T_total, 17, 1024)
 
 ### 3.2 四组 GCTE
 
-从 CamDistill 小修改复制 `FrameCrossAttentionLayer`：
+从 CamDistill 小修改复制 `SceneDistillPreFrameCrossAttentionLayer`：
 
 - 将输入从 `(T,1,D)` 泛化为 `(T,17,D)`。
 - Q reshape 为 `(group, heads, 17, head_dim)`。
@@ -192,7 +192,7 @@ total_loss = sft_loss + 0.05 * distill_loss
 
 为避免跨 batch 残留：
 
-- inner forward 开始时将 `_last_scene_distill_loss` 清为 `None`。
+- inner forward 开始时将 `_last_pre_distill_loss` 清为 `None`。
 - 同一 forward 内计算标量并由外层 causal-LM wrapper立即读取。
 - 外层加入 SFT loss 后再次清空引用。
 - 如果训练 batch 缺少 teacher inputs、帧数不一致或出现非有限值，直接报错，不把 distillation loss 静默置零。
@@ -287,7 +287,7 @@ insert position=front
 
 ### 4.3 Checkpoint 恢复
 
-将 `scene_distill_module` 加入 Qwen3.5 自定义子模块 checkpoint 发现和恢复范围。当前 shard 筛选只识别 geometry/projector/fusion 关键词，[modeling_qwen3_5.py:44–50](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:44)，加载逻辑位于 [modeling_qwen3_5.py:237–268](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:237)。
+将 `scene_distill_pre_module` 加入 Qwen3.5 自定义子模块 checkpoint 发现和恢复范围。当前 shard 筛选只识别 geometry/projector/fusion 关键词，[modeling_qwen3_5.py:44–50](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:44)，加载逻辑位于 [modeling_qwen3_5.py:237–268](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:237)。
 
 保存/恢复契约：
 

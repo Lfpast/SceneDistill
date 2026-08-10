@@ -24,7 +24,8 @@ class ModelArguments:
     include_camera_token: bool = field(default=False)  # Whether to include camera token
     geometry_direct_token_mode: str = field(default="special17")  # Direct injection token set: "camera" or "special17"
     geometry_token_insert_position: str = field(default="front")  # Direct injection token order: "front" or "back"
-    distill_weight: float = field(default=0.05)  # SceneDistill cosine-loss weight
+    pre_distill_weight: float = field(default=0.05)  # SceneDistill pre-LLM cosine-loss weight
+    post_distill_weight: float = field(default=0.05)  # SceneDistill post-LLM cosine-loss weight
     pos_encoding_type: str = field(default="none")  # Position encoding: "none", "rope2d", or "sincos2d"
     vision_language_fusion_layers: Optional[List[int]] = field(default=None)  # Vision block indices to fuse into decoder
 

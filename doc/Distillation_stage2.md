@@ -58,13 +58,13 @@ $$
 
 - `F_pre` 继续用于 Stage 1 distillation 和 LLM projector。
 - `Z_pre`，即最后一次 global attention 后的 `17×1024` 状态，作为 Stage 2 初始 Q。
-- `SceneDistillModule.forward` 的内部返回值由两个扩展为三个：
+- `SceneDistillPreModule.forward` 的内部返回值由两个扩展为三个：
 
 ```python
-student_embeds, pre_features, pre_global_tokens
+pre_embeds, pre_features, pre_global_tokens
 ```
 
-这是内部接口变更；现有 `scene_distill_module` 名称、模型类型和 geometry 注册保持不变。
+这是内部接口变更；现有 `scene_distill_module.py` 源码文件名、模型类型和 geometry 注册保持不变。
 
 ### 2.2 LLM hidden-state 提取
 
@@ -135,7 +135,7 @@ $$
 - Q：该帧的 17 个 `1024-D` camera/scene tokens。
 - K/V：该帧当前 LLM 层的完整 image span，即 `17 special + P_f visual`，维度为 `D_l`。
 - 不读取文本或其他帧。
-- `FrameCrossAttentionLayer` 的不同 Q/KV 维度投影直接复用现有实现，[scene_distill_module.py:48–133](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:48)。
+- `SceneDistillPostFrameCrossAttentionLayer` 的不同 Q/KV 维度投影直接复用共享实现，[scene_distill_module.py:48–133](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:48)。
 - 其机制源自 CamDistill 的 Q/K/V projection、QK norm、SDPA、FFN 和 LayerScale，[camdistill_model.py:18–137](/home/jackson/python/CamDistill/camera_movement_sft/plugins/camdistill_model.py:18)。
 
 随后：
@@ -279,14 +279,14 @@ post_distill_weight = 0.05
 3. 明确区分：
 
 ```python
-PRE_DISTILL_DEPTH = len(VISION_BLOCK_INDICES)
+PRE_DISTILL_DEPTH = len(PRE_VISION_BLOCK_INDICES)
 POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
 ```
 
-4. 扩展 `SceneDistillModule.forward`，额外返回最终 post-global `17×1024` 状态。
+4. 扩展 `SceneDistillPreModule.forward`，额外返回最终 pre-global `17×1024` 状态。
 5. 新增 `SceneDistillPostModule`：
-   - 6 个全新 `FrameCrossAttentionLayer` 实例。
-   - 6 个全新 `GlobalCameraSceneSelfAttentionLayer` 实例。
+   - 6 个全新 `SceneDistillPostFrameCrossAttentionLayer` 实例。
+   - 6 个全新 `SceneDistillPostGlobalCameraSceneSelfAttentionLayer` 实例。
    - 不与 Stage 1 `ModuleList` 共享对象或参数。
    - 不拥有新的 camera/scene initialization parameters。
    - 不拥有 projector。
@@ -297,7 +297,7 @@ POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
    - `pre_global_tokens.shape == (T,17,1024)`。
    - 最终 `post_features.shape == (T,17,2048)`。
 7. 继续用同一个 `scene_distillation_loss` 计算两个独立标量。
-8. 把之前stage1使用的`SceneDistillModule`重命名为`SceneDistillPreModule`,和新增的post做语义区分
+8. 将 Stage 1 的 `SceneDistillModule` 重命名为 `SceneDistillPreModule`，并为所有 Stage 1 专属模块、属性和常量加入 `pre`/`Pre` 语义前缀，与新增的 Post 路径明确区分。
 
 ### 4.2 为自定义 Qwen3.5 LLM 增加选择性捕获
 
@@ -327,10 +327,11 @@ Stage 1 已使用 `image_mask[...,0]` 定位 visual positions，[modeling_qwen3_
 
 在 [modeling_qwen3_5_scene_distill.py](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:59) 原文件内：
 
-1. 保留 `scene_distill_module` 作为 pre 模块。
+1. 将 pre 模块属性硬重命名为 `scene_distill_pre_module`。
 2. 新增独立属性：
 
 ```python
+self.scene_distill_pre_module
 self.scene_distill_post_module
 self._last_pre_distill_loss
 self._last_post_distill_loss
@@ -382,6 +383,7 @@ and corresponding weight > 0
 在 checkpoint 发现列表 [modeling_qwen3_5.py:44–51](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:44) 中显式加入：
 
 ```python
+"scene_distill_pre_module"
 "scene_distill_post_module"
 ```
 

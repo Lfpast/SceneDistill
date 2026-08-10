@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -44,7 +44,8 @@ from .position_utils import get_2d_sincos_pos_embed
 GEOMETRY_STATE_KEYWORDS = (
     "geometry_encoder",
     "direct_projector",
-    "scene_distill_module",
+    "scene_distill_pre_module",
+    "scene_distill_post_module",
     "language_feature_fusion",
     "feature_fusion",
     "geometry_merger",
@@ -284,6 +285,8 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         image_mask: Optional[torch.Tensor] = None,
         grid_thw: Optional[torch.Tensor] = None,
         include_camera_token: bool = False,
+        capture_hidden_state_layers: Optional[Sequence[int]] = None,
+        capture_hidden_state_mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -324,6 +327,39 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
 
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
+
+        capture_layers = (
+            None
+            if capture_hidden_state_layers is None
+            else tuple(int(layer) for layer in capture_hidden_state_layers)
+        )
+        if (capture_layers is None) != (capture_hidden_state_mask is None):
+            raise ValueError(
+                "capture_hidden_state_layers and capture_hidden_state_mask must be provided together."
+            )
+        if capture_layers is not None:
+            if not capture_layers:
+                raise ValueError("capture_hidden_state_layers cannot be empty.")
+            if capture_layers != tuple(sorted(set(capture_layers))):
+                raise ValueError(
+                    "capture_hidden_state_layers must contain unique layer indices in ascending order."
+                )
+            if capture_layers[0] < 0 or capture_layers[-1] >= self.config.num_hidden_layers:
+                raise ValueError(
+                    f"capture_hidden_state_layers={capture_layers} is outside "
+                    f"num_hidden_layers={self.config.num_hidden_layers}."
+                )
+            if (
+                capture_hidden_state_mask.dtype != torch.bool
+                or capture_hidden_state_mask.shape != hidden_states.shape[:2]
+            ):
+                raise ValueError(
+                    "capture_hidden_state_mask must be a bool tensor with shape "
+                    f"{hidden_states.shape[:2]}, got dtype={capture_hidden_state_mask.dtype} "
+                    f"and shape={capture_hidden_state_mask.shape}."
+                )
+        capture_layer_set = set(capture_layers or ())
+        captured_hidden_states = []
 
         vis_pos_embed_per_image: Optional[torch.Tensor] = None
         geo_pos_embed_per_image: Optional[torch.Tensor] = None
@@ -377,6 +413,9 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
                 **kwargs,
             )
 
+            if layer_idx in capture_layer_set:
+                captured_hidden_states.append(hidden_states[capture_hidden_state_mask])
+
             if (
                 geometry_layer_features is not None
                 and fusion_module is not None
@@ -395,11 +434,16 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
                 hidden_states = hidden_states.clone()
                 hidden_states[vision_token_mask] = fused
 
+        if capture_layers is not None and len(captured_hidden_states) != len(capture_layers):
+            raise RuntimeError(
+                f"Captured {len(captured_hidden_states)} hidden states for requested layers {capture_layers}."
+            )
         hidden_states = self.norm(hidden_states)
 
         return Qwen3_5ModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values,
+            hidden_states=tuple(captured_hidden_states) if capture_layers is not None else None,
         )
 
 

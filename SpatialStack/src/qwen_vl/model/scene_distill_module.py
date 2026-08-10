@@ -12,12 +12,15 @@ import torch.nn.functional as F
 
 NUM_SCENE_TOKENS = 16
 NUM_SPECIAL_TOKENS = 1 + NUM_SCENE_TOKENS
-VISION_BLOCK_INDICES = (0, 4, 8, 12)
+PRE_VISION_BLOCK_INDICES = (0, 4, 8, 12)
+LLM_BLOCK_INDICES = (4, 8, 12, 16, 20, 24)
 STREAM_DIM = 1024
 FEATURE_DIM = 2 * STREAM_DIM
 NUM_HEADS = 16
-DEPTH = len(VISION_BLOCK_INDICES)
-DISTILL_WEIGHT = 0.05
+PRE_DISTILL_DEPTH = len(PRE_VISION_BLOCK_INDICES)
+POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
+PRE_DISTILL_WEIGHT = 0.05
+POST_DISTILL_WEIGHT = 0.05
 
 
 def remove_teacher_weights(state_dict):
@@ -32,20 +35,23 @@ def remove_teacher_weights(state_dict):
     return filtered
 
 
-def select_vision_layer_outputs(hidden_states: Sequence[torch.Tensor]) -> list[torch.Tensor]:
+def select_pre_vision_layer_outputs(hidden_states: Sequence[torch.Tensor]) -> list[torch.Tensor]:
     """Select the 1st, 5th, 9th, and 13th vision block outputs."""
-    if hidden_states is None or max(VISION_BLOCK_INDICES) >= len(hidden_states):
+    if hidden_states is None or max(PRE_VISION_BLOCK_INDICES) >= len(hidden_states):
         num_layers = 0 if hidden_states is None else len(hidden_states)
         raise ValueError(
-            f"Qwen3.5 returned {num_layers} vision layers; SceneDistill requires indices {VISION_BLOCK_INDICES}."
+            f"Qwen3.5 returned {num_layers} vision layers; "
+            f"SceneDistill Pre requires indices {PRE_VISION_BLOCK_INDICES}."
         )
-    selected = [hidden_states[index] for index in VISION_BLOCK_INDICES]
+    selected = [hidden_states[index] for index in PRE_VISION_BLOCK_INDICES]
     if any(features is None for features in selected):
-        raise ValueError(f"Qwen3.5 did not capture every required vision layer {VISION_BLOCK_INDICES}.")
+        raise ValueError(
+            f"Qwen3.5 did not capture every required SceneDistill Pre vision layer {PRE_VISION_BLOCK_INDICES}."
+        )
     return selected
 
 
-class FrameCrossAttentionLayer(nn.Module):
+class _FrameCrossAttentionLayer(nn.Module):
     """Special tokens attend to the visual tokens from their own frame."""
 
     def __init__(self, special_dim: int, visual_dim: int, num_heads: int):
@@ -85,8 +91,10 @@ class FrameCrossAttentionLayer(nn.Module):
     ) -> torch.Tensor:
         if special_tokens.numel() == 0:
             return special_tokens
-        if special_tokens.ndim != 3:
-            raise ValueError(f"special_tokens must have shape (frames, tokens, dim), got {special_tokens.shape}.")
+        if special_tokens.ndim != 3 or special_tokens.shape[-1] != self.special_dim:
+            raise ValueError(
+                f"special_tokens must have shape (frames, tokens, {self.special_dim}), got {special_tokens.shape}."
+            )
         if visual_features.ndim != 2 or visual_features.shape[-1] != self.visual_dim:
             raise ValueError(
                 f"visual_features must have shape (tokens, {self.visual_dim}), got {visual_features.shape}."
@@ -133,7 +141,15 @@ class FrameCrossAttentionLayer(nn.Module):
         return special_tokens + self.ls_ffn * self.ffn(self.norm_ffn(special_tokens))
 
 
-class GlobalCameraSceneSelfAttentionLayer(nn.Module):
+class SceneDistillPreFrameCrossAttentionLayer(_FrameCrossAttentionLayer):
+    """SceneDistill Pre frame-wise cross-attention layer."""
+
+
+class SceneDistillPostFrameCrossAttentionLayer(_FrameCrossAttentionLayer):
+    """SceneDistill Post frame-wise cross-attention layer."""
+
+
+class _GlobalCameraSceneSelfAttentionLayer(nn.Module):
     """Run self-attention over all 17 special tokens across one video at a time."""
 
     def __init__(self, special_dim: int, num_heads: int):
@@ -161,6 +177,10 @@ class GlobalCameraSceneSelfAttentionLayer(nn.Module):
     def forward(self, special_tokens: torch.Tensor, video_sizes: Sequence[int]) -> torch.Tensor:
         if special_tokens.numel() == 0:
             return special_tokens
+        if special_tokens.ndim != 3 or special_tokens.shape[-1] != self.special_dim:
+            raise ValueError(
+                f"special_tokens must have shape (frames, tokens, {self.special_dim}), got {special_tokens.shape}."
+            )
         video_sizes = [int(size) for size in video_sizes]
         if any(size <= 0 for size in video_sizes):
             raise ValueError(f"video_sizes must contain positive frame counts, got {video_sizes}.")
@@ -193,7 +213,15 @@ class GlobalCameraSceneSelfAttentionLayer(nn.Module):
         return torch.cat(outputs, dim=0)
 
 
-class SceneDistillProjector(nn.Module):
+class SceneDistillPreGlobalCameraSceneSelfAttentionLayer(_GlobalCameraSceneSelfAttentionLayer):
+    """SceneDistill Pre global camera-scene self-attention layer."""
+
+
+class SceneDistillPostGlobalCameraSceneSelfAttentionLayer(_GlobalCameraSceneSelfAttentionLayer):
+    """SceneDistill Post global camera-scene self-attention layer."""
+
+
+class SceneDistillPreProjector(nn.Module):
     """Project 2048-D distilled features into the Qwen text hidden space."""
 
     def __init__(self, input_dim: int, output_dim: int):
@@ -209,8 +237,8 @@ class SceneDistillProjector(nn.Module):
         return self.linear_fc2(self.act_fn(self.linear_fc1(features)))
 
 
-class SceneDistillModule(nn.Module):
-    """Four-stage camera-scene GCTE student and its LLM projector."""
+class SceneDistillPreModule(nn.Module):
+    """Four-stage pre-LLM camera-scene GCTE student and its LLM projector."""
 
     def __init__(
         self,
@@ -224,33 +252,35 @@ class SceneDistillModule(nn.Module):
         self.stream_dim = stream_dim
         self.feature_dim = 2 * stream_dim
 
-        self.camera_token = nn.Parameter(torch.empty(1, 2, 1, stream_dim))
-        self.scene_token = nn.Parameter(torch.empty(1, 2, NUM_SCENE_TOKENS, stream_dim))
-        self.frame_layers = nn.ModuleList(
-            FrameCrossAttentionLayer(stream_dim, visual_dim, num_heads) for _ in range(DEPTH)
+        self.pre_camera_token = nn.Parameter(torch.empty(1, 2, 1, stream_dim))
+        self.pre_scene_token = nn.Parameter(torch.empty(1, 2, NUM_SCENE_TOKENS, stream_dim))
+        self.pre_frame_layers = nn.ModuleList(
+            SceneDistillPreFrameCrossAttentionLayer(stream_dim, visual_dim, num_heads)
+            for _ in range(PRE_DISTILL_DEPTH)
         )
-        self.global_layers = nn.ModuleList(
-            GlobalCameraSceneSelfAttentionLayer(stream_dim, num_heads) for _ in range(DEPTH)
+        self.pre_global_layers = nn.ModuleList(
+            SceneDistillPreGlobalCameraSceneSelfAttentionLayer(stream_dim, num_heads)
+            for _ in range(PRE_DISTILL_DEPTH)
         )
-        self.projector = SceneDistillProjector(self.feature_dim, text_hidden_dim)
+        self.pre_projector = SceneDistillPreProjector(self.feature_dim, text_hidden_dim)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        nn.init.normal_(self.camera_token, std=1e-3)
-        nn.init.normal_(self.scene_token, std=1e-3)
+        nn.init.normal_(self.pre_camera_token, std=1e-3)
+        nn.init.normal_(self.pre_scene_token, std=1e-3)
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-    def prepare_special_tokens(self, video_sizes: Sequence[int]) -> torch.Tensor:
+    def prepare_pre_special_tokens(self, video_sizes: Sequence[int]) -> torch.Tensor:
         video_sizes = [int(size) for size in video_sizes]
         if not video_sizes or any(size <= 0 for size in video_sizes):
             raise ValueError(f"video_sizes must contain positive frame counts, got {video_sizes}.")
 
-        first_variant = torch.cat([self.camera_token[:, 0], self.scene_token[:, 0]], dim=1)
-        other_variant = torch.cat([self.camera_token[:, 1], self.scene_token[:, 1]], dim=1)
+        first_variant = torch.cat([self.pre_camera_token[:, 0], self.pre_scene_token[:, 0]], dim=1)
+        other_variant = torch.cat([self.pre_camera_token[:, 1], self.pre_scene_token[:, 1]], dim=1)
         per_video_tokens = []
         for video_size in video_sizes:
             per_video_tokens.append(first_variant)
@@ -263,31 +293,129 @@ class SceneDistillModule(nn.Module):
         visual_layer_outputs: Sequence[torch.Tensor],
         frame_sizes: Sequence[int],
         video_sizes: Sequence[int],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if len(visual_layer_outputs) != DEPTH:
-            raise ValueError(f"SceneDistill requires {DEPTH} visual layers, got {len(visual_layer_outputs)}.")
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if len(visual_layer_outputs) != PRE_DISTILL_DEPTH:
+            raise ValueError(
+                f"SceneDistill Pre requires {PRE_DISTILL_DEPTH} visual layers, got {len(visual_layer_outputs)}."
+            )
         if len(frame_sizes) != sum(int(size) for size in video_sizes):
             raise ValueError(
                 f"frame_sizes has {len(frame_sizes)} entries but video_sizes describes "
                 f"{sum(int(size) for size in video_sizes)} frames."
             )
 
-        special_tokens = self.prepare_special_tokens(video_sizes)
-        target_device = self.camera_token.device
-        target_dtype = self.camera_token.dtype
+        special_tokens = self.prepare_pre_special_tokens(video_sizes)
+        target_device = self.pre_camera_token.device
+        target_dtype = self.pre_camera_token.dtype
         special_tokens = special_tokens.to(device=target_device, dtype=target_dtype)
 
         special_after_frame = None
         for layer_index, visual_features in enumerate(visual_layer_outputs):
             visual_features = visual_features.detach().to(device=target_device, dtype=target_dtype)
-            special_tokens = self.frame_layers[layer_index](special_tokens, visual_features, frame_sizes)
-            if layer_index == DEPTH - 1:
+            special_tokens = self.pre_frame_layers[layer_index](special_tokens, visual_features, frame_sizes)
+            if layer_index == PRE_DISTILL_DEPTH - 1:
                 special_after_frame = special_tokens
-            special_tokens = self.global_layers[layer_index](special_tokens, video_sizes)
+            special_tokens = self.pre_global_layers[layer_index](special_tokens, video_sizes)
 
-        student_features = torch.cat([special_after_frame, special_tokens], dim=-1)
-        student_embeds = self.projector(student_features)
-        return student_embeds, student_features
+        pre_features = torch.cat([special_after_frame, special_tokens], dim=-1)
+        expected_shape = (sum(int(size) for size in video_sizes), NUM_SPECIAL_TOKENS, self.feature_dim)
+        if pre_features.shape != expected_shape:
+            raise ValueError(f"SceneDistill Pre features must have shape {expected_shape}, got {pre_features.shape}.")
+        pre_embeds = self.pre_projector(pre_features)
+        return pre_embeds, pre_features, special_tokens
+
+
+class SceneDistillPostModule(nn.Module):
+    """Six-stage post-LLM camera-scene GCTE distillation head."""
+
+    def __init__(
+        self,
+        llm_hidden_dim: int,
+        special_dim: int = STREAM_DIM,
+        num_heads: int = NUM_HEADS,
+        depth: int = POST_DISTILL_DEPTH,
+    ):
+        super().__init__()
+        if depth != POST_DISTILL_DEPTH:
+            raise ValueError(
+                f"SceneDistill Post depth is fixed at {POST_DISTILL_DEPTH}, got {depth}."
+            )
+
+        self.llm_hidden_dim = int(llm_hidden_dim)
+        self.special_dim = int(special_dim)
+        self.feature_dim = 2 * self.special_dim
+        self.post_frame_layers = nn.ModuleList(
+            SceneDistillPostFrameCrossAttentionLayer(self.special_dim, self.llm_hidden_dim, num_heads)
+            for _ in range(POST_DISTILL_DEPTH)
+        )
+        self.post_global_layers = nn.ModuleList(
+            SceneDistillPostGlobalCameraSceneSelfAttentionLayer(self.special_dim, num_heads)
+            for _ in range(POST_DISTILL_DEPTH)
+        )
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(
+        self,
+        pre_global_tokens: torch.Tensor,
+        llm_layer_features: Sequence[torch.Tensor],
+        frame_sizes: Sequence[int],
+        video_sizes: Sequence[int],
+    ) -> torch.Tensor:
+        video_sizes = [int(size) for size in video_sizes]
+        frame_sizes = [int(size) for size in frame_sizes]
+        num_frames = sum(video_sizes)
+        expected_pre_shape = (num_frames, NUM_SPECIAL_TOKENS, self.special_dim)
+        if pre_global_tokens.shape != expected_pre_shape:
+            raise ValueError(
+                f"pre_global_tokens must have shape {expected_pre_shape}, got {pre_global_tokens.shape}."
+            )
+        if len(frame_sizes) != num_frames or any(size <= NUM_SPECIAL_TOKENS for size in frame_sizes):
+            raise ValueError(
+                "SceneDistill Post frame_sizes must contain one positive visual span plus "
+                f"{NUM_SPECIAL_TOKENS} special tokens per frame, got {frame_sizes}."
+            )
+        if len(llm_layer_features) != POST_DISTILL_DEPTH:
+            raise ValueError(
+                f"SceneDistill Post requires {POST_DISTILL_DEPTH} LLM layers "
+                f"{LLM_BLOCK_INDICES}, got {len(llm_layer_features)}."
+            )
+
+        expected_llm_tokens = sum(frame_sizes)
+        for layer_position, features in enumerate(llm_layer_features):
+            expected_shape = (expected_llm_tokens, self.llm_hidden_dim)
+            if features.shape != expected_shape:
+                raise ValueError(
+                    f"LLM layer {LLM_BLOCK_INDICES[layer_position]} features must have shape "
+                    f"{expected_shape}, got {features.shape}."
+                )
+
+        reference_parameter = next(self.parameters())
+        post_tokens = pre_global_tokens.to(
+            device=reference_parameter.device,
+            dtype=reference_parameter.dtype,
+        )
+        post_after_frame = None
+        for layer_index, llm_features in enumerate(llm_layer_features):
+            llm_features = llm_features.to(device=post_tokens.device, dtype=post_tokens.dtype)
+            post_tokens = self.post_frame_layers[layer_index](post_tokens, llm_features, frame_sizes)
+            if layer_index == POST_DISTILL_DEPTH - 1:
+                post_after_frame = post_tokens
+            post_tokens = self.post_global_layers[layer_index](post_tokens, video_sizes)
+
+        post_features = torch.cat([post_after_frame, post_tokens], dim=-1)
+        expected_post_shape = (num_frames, NUM_SPECIAL_TOKENS, self.feature_dim)
+        if post_features.shape != expected_post_shape:
+            raise ValueError(
+                f"SceneDistill Post features must have shape {expected_post_shape}, got {post_features.shape}."
+            )
+        return post_features
 
 
 def scene_distillation_loss(student_features: torch.Tensor, teacher_features: torch.Tensor) -> torch.Tensor:
@@ -316,18 +444,24 @@ def scene_distillation_loss(student_features: torch.Tensor, teacher_features: to
 
 
 __all__ = [
-    "DEPTH",
-    "DISTILL_WEIGHT",
     "FEATURE_DIM",
-    "FrameCrossAttentionLayer",
-    "GlobalCameraSceneSelfAttentionLayer",
+    "LLM_BLOCK_INDICES",
     "NUM_SCENE_TOKENS",
     "NUM_SPECIAL_TOKENS",
-    "SceneDistillModule",
-    "SceneDistillProjector",
+    "POST_DISTILL_DEPTH",
+    "POST_DISTILL_WEIGHT",
+    "PRE_DISTILL_DEPTH",
+    "PRE_DISTILL_WEIGHT",
+    "PRE_VISION_BLOCK_INDICES",
+    "SceneDistillPostFrameCrossAttentionLayer",
+    "SceneDistillPostGlobalCameraSceneSelfAttentionLayer",
+    "SceneDistillPostModule",
+    "SceneDistillPreFrameCrossAttentionLayer",
+    "SceneDistillPreGlobalCameraSceneSelfAttentionLayer",
+    "SceneDistillPreModule",
+    "SceneDistillPreProjector",
     "STREAM_DIM",
-    "VISION_BLOCK_INDICES",
-    "scene_distillation_loss",
     "remove_teacher_weights",
-    "select_vision_layer_outputs",
+    "scene_distillation_loss",
+    "select_pre_vision_layer_outputs",
 ]
