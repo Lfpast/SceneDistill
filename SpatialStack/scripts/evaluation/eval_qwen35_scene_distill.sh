@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen3_5_output/SceneDistill-stage1}"
+export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen35_output/SceneDistill-stage1-005}"
 export MODEL_IMPL="${MODEL_IMPL:-qwen3_5_scene_distill}"
 export GEOMETRY_ENCODER_PATH="${GEOMETRY_ENCODER_PATH:-facebook/VGGT-Omega}"
 export BENCHMARKS="${BENCHMARKS:-vsibench,cvbench,blink_spatial,sparbench,videomme,mmsibench}"
