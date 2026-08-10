@@ -14,5 +14,6 @@ SpatialStack_temp/
 slurm_logs/
 train.sbatch
 eval.sh
+!/SpatialStack/scripts/evaluation/eval.sh
 output/
 extract.sbatch
