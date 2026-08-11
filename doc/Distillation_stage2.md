@@ -8,7 +8,7 @@ Stage 2 继续使用现有 `geometry_encoder_type="scene_distill"`，不新增�
 
 保留 Stage 1 全部组件：
 
-- Vision Encoder 第 `[0,4,8,12]` 层特征。
+- Vision Encoder zero-based block `[0,4,8,12]` 的输出；在 Transformers `hidden_states` tuple 中对应 `[1,5,9,13]`。
 - 四组 pre-LLM GCTE。
 - 1 camera + 16 scene tokens。
 - Stage 1 VGGT-Omega cosine distillation。
@@ -135,7 +135,7 @@ $$
 - Q：该帧的 17 个 `1024-D` camera/scene tokens。
 - K/V：该帧当前 LLM 层的完整 image span，即 `17 special + P_f visual`，维度为 `D_l`。
 - 不读取文本或其他帧。
-- `SceneDistillPostFrameCrossAttentionLayer` 的不同 Q/KV 维度投影直接复用共享实现，[scene_distill_module.py:48–133](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:48)。
+- 公用 `FrameCrossAttentionLayer` 的不同 Q/KV 维度投影同时服务 Pre/Post；两条路径使用不同实例、互不共享参数，[scene_distill_module.py:51](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:51)。
 - 其机制源自 CamDistill 的 Q/K/V projection、QK norm、SDPA、FFN 和 LayerScale，[camdistill_model.py:18–137](/home/jackson/python/CamDistill/camera_movement_sft/plugins/camdistill_model.py:18)。
 
 随后：
@@ -143,7 +143,7 @@ $$
 $$
 Z^{(m)}
 =
-\operatorname{GlobalCameraSceneSelfAttn}^{(m)}
+\operatorname{GlobalSelfAttn}^{(m)}
 (\widetilde Z^{(m)})
 $$
 
@@ -285,8 +285,8 @@ POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
 
 4. 扩展 `SceneDistillPreModule.forward`，额外返回最终 pre-global `17×1024` 状态。
 5. 新增 `SceneDistillPostModule`：
-   - 6 个全新 `SceneDistillPostFrameCrossAttentionLayer` 实例。
-   - 6 个全新 `SceneDistillPostGlobalCameraSceneSelfAttentionLayer` 实例。
+   - 6 个全新公用 `FrameCrossAttentionLayer` 实例。
+   - 6 个全新公用 `GlobalSelfAttentionLayer` 实例。
    - 不与 Stage 1 `ModuleList` 共享对象或参数。
    - 不拥有新的 camera/scene initialization parameters。
    - 不拥有 projector。
@@ -297,7 +297,7 @@ POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
    - `pre_global_tokens.shape == (T,17,1024)`。
    - 最终 `post_features.shape == (T,17,2048)`。
 7. 继续用同一个 `scene_distillation_loss` 计算两个独立标量。
-8. 将 Stage 1 的 `SceneDistillModule` 重命名为 `SceneDistillPreModule`，并为所有 Stage 1 专属模块、属性和常量加入 `pre`/`Pre` 语义前缀，与新增的 Post 路径明确区分。
+8. 将 Stage 1 的 `SceneDistillModule` 重命名为 `SceneDistillPreModule`；Pre/Post 保留不同的 `ModuleList` 属性名，但复用同一组公用 attention 类。
 
 ### 4.2 为自定义 Qwen3.5 LLM 增加选择性捕获
 
@@ -489,9 +489,9 @@ sbatch \
 - 不让 post-GCTE 在 generation 时运行。
 - 不让 post-GCTE 输出回写 LLM。
 - 不新增 gated residual、额外 projector、逐层 loss 或 teacher cache。
-- 不改变 Vision 层 `[0,4,8,12]`。
+- Pre 读取 Transformers Vision `hidden_states` 的 `[1,5,9,13]`，即 zero-based block `[0,4,8,12]` 的输出。
 - 不让 pre/post attention 层共享参数。
-- 不改变 SFT labels、MRoPE、attention mask 或 cache-position 扩展语义。
+- SFT labels、attention mask 与 cache-position 扩展语义保持不变；SceneDistill MRoPE anchor 改为对应帧的空间中心。
 
 ## 6. 测试与验收
 

@@ -59,8 +59,8 @@ def _build_extra_position_ids(
         visual_anchor = torch.stack(
             [
                 visual_position_ids[0, 0],
-                visual_position_ids[1].min(),
-                visual_position_ids[2].min(),
+                (visual_position_ids[1].min() + visual_position_ids[1].max() + 1) // 2,
+                (visual_position_ids[2].min() + visual_position_ids[2].max() + 1) // 2,
             ]
         ).view(3, 1)
         if text_anchor is not None:

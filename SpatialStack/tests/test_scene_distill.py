@@ -13,11 +13,9 @@ from qwen_vl.model.scene_distill_module import (
     PRE_DISTILL_DEPTH,
     PRE_DISTILL_WEIGHT,
     PRE_VISION_BLOCK_INDICES,
-    SceneDistillPostFrameCrossAttentionLayer,
-    SceneDistillPostGlobalCameraSceneSelfAttentionLayer,
+    FrameCrossAttentionLayer,
+    GlobalSelfAttentionLayer,
     SceneDistillPostModule,
-    SceneDistillPreFrameCrossAttentionLayer,
-    SceneDistillPreGlobalCameraSceneSelfAttentionLayer,
     SceneDistillPreModule,
     remove_teacher_weights,
     scene_distillation_loss,
@@ -48,7 +46,7 @@ def test_special_token_initialization_uses_first_and_other_variants():
 
 def test_frame_cross_attention_isolates_frames():
     torch.manual_seed(0)
-    layer = SceneDistillPreFrameCrossAttentionLayer(
+    layer = FrameCrossAttentionLayer(
         special_dim=8, visual_dim=6, num_heads=2
     ).eval()
     special_tokens = torch.randn(2, NUM_SPECIAL_TOKENS, 8)
@@ -65,7 +63,7 @@ def test_frame_cross_attention_isolates_frames():
 
 def test_global_attention_isolates_videos():
     torch.manual_seed(1)
-    layer = SceneDistillPreGlobalCameraSceneSelfAttentionLayer(
+    layer = GlobalSelfAttentionLayer(
         special_dim=8, num_heads=2
     ).eval()
     special_tokens = torch.randn(3, NUM_SPECIAL_TOKENS, 8)
@@ -88,7 +86,7 @@ def test_four_stage_module_shapes():
         visual_layers, frame_sizes=[2, 3, 2], video_sizes=[2, 1]
     )
 
-    assert PRE_VISION_BLOCK_INDICES == (0, 4, 8, 12)
+    assert PRE_VISION_BLOCK_INDICES == (1, 5, 9, 13)
     assert PRE_DISTILL_DEPTH == 4
     assert features.shape == (3, NUM_SPECIAL_TOKENS, 16)
     assert embeds.shape == (3, NUM_SPECIAL_TOKENS, 10)
@@ -115,7 +113,7 @@ def test_selects_exact_vision_block_outputs():
 
     selected = select_pre_vision_layer_outputs(hidden_states)
 
-    assert [int(features[0, 0].item()) for features in selected] == [0, 4, 8, 12]
+    assert [int(features[0, 0].item()) for features in selected] == [1, 5, 9, 13]
 
 
 def test_distillation_loss_is_index_aligned_and_sums_tokens():
@@ -194,6 +192,33 @@ def test_placeholder_expansion_masks_prepend_labels():
     assert torch.equal(expanded_labels[0, 1:1 + NUM_SPECIAL_TOKENS], torch.full((NUM_SPECIAL_TOKENS,), -100))
     assert torch.equal(expanded_attention, torch.ones_like(expanded_attention))
 
+
+def test_scene_distill_placeholder_positions_use_frame_center():
+    input_ids = torch.tensor([[1, 99, 99, 99, 99, 2]])
+    position_ids = torch.tensor(
+        [
+            [[7, 8, 8, 8, 8, 9]],
+            [[7, 4, 4, 4, 4, 9]],
+            [[7, 10, 10, 11, 11, 9]],
+            [[7, 20, 21, 20, 21, 9]],
+        ]
+    )
+
+    _, _, _, expanded_positions = expand_visual_placeholders(
+        input_ids=input_ids,
+        labels=None,
+        attention_mask=torch.ones_like(input_ids),
+        position_ids=position_ids,
+        placeholder_token_id=99,
+        num_extra_per_frame=NUM_SPECIAL_TOKENS,
+        insert_position="front",
+    )
+
+    expected_anchor = torch.tensor([8, 4, 11, 21]).view(4, 1)
+    torch.testing.assert_close(
+        expanded_positions[:, 0, 1:1 + NUM_SPECIAL_TOKENS],
+        expected_anchor.expand(-1, NUM_SPECIAL_TOKENS),
+    )
 
 def test_scene_distill_pre_module_state_dict_round_trip():
     torch.manual_seed(3)
@@ -295,7 +320,7 @@ def test_post_frame_attention_uses_only_the_corresponding_frame_span():
 
 def test_post_global_attention_isolates_videos():
     torch.manual_seed(7)
-    layer = SceneDistillPostGlobalCameraSceneSelfAttentionLayer(
+    layer = GlobalSelfAttentionLayer(
         special_dim=8,
         num_heads=2,
     ).eval()
@@ -312,7 +337,7 @@ def test_post_global_attention_isolates_videos():
 
 def test_post_global_attention_connects_frames_within_one_video():
     torch.manual_seed(9)
-    layer = SceneDistillPostGlobalCameraSceneSelfAttentionLayer(
+    layer = GlobalSelfAttentionLayer(
         special_dim=8,
         num_heads=2,
     ).eval()
@@ -327,7 +352,7 @@ def test_post_global_attention_connects_frames_within_one_video():
     torch.testing.assert_close(baseline[2], changed[2])
 
 
-def test_pre_and_post_modules_have_disjoint_parameters_and_semantic_names():
+def test_pre_and_post_modules_use_public_attention_classes_with_disjoint_parameters():
     pre_module = SceneDistillPreModule(
         visual_dim=6,
         text_hidden_dim=10,
@@ -346,9 +371,11 @@ def test_pre_and_post_modules_have_disjoint_parameters_and_semantic_names():
     assert len({id(layer) for layer in post_module.post_frame_layers}) == POST_DISTILL_DEPTH
     assert len({id(layer) for layer in post_module.post_global_layers}) == POST_DISTILL_DEPTH
     assert all(
-        isinstance(layer, SceneDistillPostFrameCrossAttentionLayer)
+        isinstance(layer, FrameCrossAttentionLayer)
         for layer in post_module.post_frame_layers
     )
+    assert all(isinstance(layer, GlobalSelfAttentionLayer) for layer in pre_module.pre_global_layers)
+    assert all(isinstance(layer, GlobalSelfAttentionLayer) for layer in post_module.post_global_layers)
     assert not any(
         component in name
         for name, _ in post_module.named_parameters()
@@ -904,7 +931,7 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
     model.get_input_embeddings = lambda: embedding
     model._is_scene_distill = lambda: True
     model.align_geometry_modules = lambda reference_tensor=None: None
-    vision_hidden_states = [torch.zeros(4, 6) for _ in range(13)]
+    vision_hidden_states = [torch.zeros(4, 6) for _ in range(14)]
     model.get_image_features = lambda *args, **kwargs: SimpleNamespace(
         hidden_states=vision_hidden_states,
         pooler_output=torch.zeros(1, hidden_dim),

@@ -12,7 +12,10 @@ import torch.nn.functional as F
 
 NUM_SCENE_TOKENS = 16
 NUM_SPECIAL_TOKENS = 1 + NUM_SCENE_TOKENS
-PRE_VISION_BLOCK_INDICES = (0, 4, 8, 12)
+# Transformers records the input embedding at hidden_states[0], followed by
+# each vision block output. These tuple indices therefore select the outputs of
+# zero-based vision blocks 0, 4, 8, and 12.
+PRE_VISION_BLOCK_INDICES = (1, 5, 9, 13)
 LLM_BLOCK_INDICES = (4, 8, 12, 16, 20, 24)
 STREAM_DIM = 1024
 FEATURE_DIM = 2 * STREAM_DIM
@@ -51,7 +54,7 @@ def select_pre_vision_layer_outputs(hidden_states: Sequence[torch.Tensor]) -> li
     return selected
 
 
-class _FrameCrossAttentionLayer(nn.Module):
+class FrameCrossAttentionLayer(nn.Module):
     """Special tokens attend to the visual tokens from their own frame."""
 
     def __init__(self, special_dim: int, visual_dim: int, num_heads: int):
@@ -141,15 +144,7 @@ class _FrameCrossAttentionLayer(nn.Module):
         return special_tokens + self.ls_ffn * self.ffn(self.norm_ffn(special_tokens))
 
 
-class SceneDistillPreFrameCrossAttentionLayer(_FrameCrossAttentionLayer):
-    """SceneDistill Pre frame-wise cross-attention layer."""
-
-
-class SceneDistillPostFrameCrossAttentionLayer(_FrameCrossAttentionLayer):
-    """SceneDistill Post frame-wise cross-attention layer."""
-
-
-class _GlobalCameraSceneSelfAttentionLayer(nn.Module):
+class GlobalSelfAttentionLayer(nn.Module):
     """Run self-attention over all 17 special tokens across one video at a time."""
 
     def __init__(self, special_dim: int, num_heads: int):
@@ -213,14 +208,6 @@ class _GlobalCameraSceneSelfAttentionLayer(nn.Module):
         return torch.cat(outputs, dim=0)
 
 
-class SceneDistillPreGlobalCameraSceneSelfAttentionLayer(_GlobalCameraSceneSelfAttentionLayer):
-    """SceneDistill Pre global camera-scene self-attention layer."""
-
-
-class SceneDistillPostGlobalCameraSceneSelfAttentionLayer(_GlobalCameraSceneSelfAttentionLayer):
-    """SceneDistill Post global camera-scene self-attention layer."""
-
-
 class SceneDistillPreProjector(nn.Module):
     """Project 2048-D distilled features into the Qwen text hidden space."""
 
@@ -255,11 +242,11 @@ class SceneDistillPreModule(nn.Module):
         self.pre_camera_token = nn.Parameter(torch.empty(1, 2, 1, stream_dim))
         self.pre_scene_token = nn.Parameter(torch.empty(1, 2, NUM_SCENE_TOKENS, stream_dim))
         self.pre_frame_layers = nn.ModuleList(
-            SceneDistillPreFrameCrossAttentionLayer(stream_dim, visual_dim, num_heads)
+            FrameCrossAttentionLayer(stream_dim, visual_dim, num_heads)
             for _ in range(PRE_DISTILL_DEPTH)
         )
         self.pre_global_layers = nn.ModuleList(
-            SceneDistillPreGlobalCameraSceneSelfAttentionLayer(stream_dim, num_heads)
+            GlobalSelfAttentionLayer(stream_dim, num_heads)
             for _ in range(PRE_DISTILL_DEPTH)
         )
         self.pre_projector = SceneDistillPreProjector(self.feature_dim, text_hidden_dim)
@@ -345,11 +332,11 @@ class SceneDistillPostModule(nn.Module):
         self.special_dim = int(special_dim)
         self.feature_dim = 2 * self.special_dim
         self.post_frame_layers = nn.ModuleList(
-            SceneDistillPostFrameCrossAttentionLayer(self.special_dim, self.llm_hidden_dim, num_heads)
+            FrameCrossAttentionLayer(self.special_dim, self.llm_hidden_dim, num_heads)
             for _ in range(POST_DISTILL_DEPTH)
         )
         self.post_global_layers = nn.ModuleList(
-            SceneDistillPostGlobalCameraSceneSelfAttentionLayer(self.special_dim, num_heads)
+            GlobalSelfAttentionLayer(self.special_dim, num_heads)
             for _ in range(POST_DISTILL_DEPTH)
         )
         self.reset_parameters()
@@ -445,6 +432,8 @@ def scene_distillation_loss(student_features: torch.Tensor, teacher_features: to
 
 __all__ = [
     "FEATURE_DIM",
+    "FrameCrossAttentionLayer",
+    "GlobalSelfAttentionLayer",
     "LLM_BLOCK_INDICES",
     "NUM_SCENE_TOKENS",
     "NUM_SPECIAL_TOKENS",
@@ -453,11 +442,7 @@ __all__ = [
     "PRE_DISTILL_DEPTH",
     "PRE_DISTILL_WEIGHT",
     "PRE_VISION_BLOCK_INDICES",
-    "SceneDistillPostFrameCrossAttentionLayer",
-    "SceneDistillPostGlobalCameraSceneSelfAttentionLayer",
     "SceneDistillPostModule",
-    "SceneDistillPreFrameCrossAttentionLayer",
-    "SceneDistillPreGlobalCameraSceneSelfAttentionLayer",
     "SceneDistillPreModule",
     "SceneDistillPreProjector",
     "STREAM_DIM",

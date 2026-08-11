@@ -36,7 +36,7 @@ $$
 
 已锁定的实现选择：
 
-- 用户所说的第 `1/5/9/13` 层按人类 1-based 编号解释，代码索引固定为 `[0,4,8,12]`。
+- 用户所说的第 `1/5/9/13` 层按人类 1-based block 编号解释；由于 `hidden_states[0]` 是首层输入，代码读取 tuple 索引 `[1,5,9,13]`。
 - 教师特征在线计算，复用 SceneDistill 当前的冻结 `VGGTOmegaDirectEncoder`，不引入离线缓存。
 - 17 个 token 逐 index 对齐；先在每帧内求和，再对 batch 中所有有效帧求平均，最后乘 `0.05`。
 - 最终 17 个 student tokens 始终放在每帧 Qwen visual tokens 之前。
@@ -52,7 +52,7 @@ $$
 | 教师 token 顺序与特征维度 | VGGT-Omega 先拼接 camera、16 register、patch tokens，[aggregator.py:111–150](/home/jackson/python/SceneDistill/vggt-omega/vggt_omega/models/aggregator.py:111)，最后缓存 `cat([frame_tokens,tokens], dim=-1)`，因此每个 special token 是 2048 维。模型输出直接截取 `:patch_token_start`，[vggt_omega.py:41–49](/home/jackson/python/SceneDistill/vggt-omega/vggt_omega/models/vggt_omega.py:41)。 |
 | 在线提取教师 17 tokens | SceneDistill 已冻结、以 `torch.no_grad()` 运行 VGGT-Omega，[vggt_omega_direct_encoder.py:53–72](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/geometry_encoders/vggt_omega_direct_encoder.py:53)，`special17` 模式取 `tokens[:, :patch_token_start]` 并检查数量，[vggt_omega_direct_encoder.py:85–109](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/geometry_encoders/vggt_omega_direct_encoder.py:85)，输出维度明确为 2048，[vggt_omega_direct_encoder.py:120–124](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/geometry_encoders/vggt_omega_direct_encoder.py:120)。 |
 | GCTE 最终双分支特征 | CamDistill 保留最后一层 frame 输出和 global 输出，拼成 `2×stream_dim` 后再进入 projector，[camdistill_model.py:393–420](/home/jackson/python/CamDistill/camera_movement_sft/plugins/camdistill_model.py:393)。这与 VGGT-Omega 的双分支 2048 维教师特征严格对应。 |
-| 17 tokens 放在 visual tokens 前 | SceneDistill 已有按帧切分 final merged visual embeds、再 prepend direct tokens 的函数，[vggt_omega_direct_packing.py:292–320](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/vggt_omega_direct_packing.py:292)。新增 placeholder 的 label 为 `-100`、attention 为 `1`，并继承对应 visual run 的位置编码，[vggt_omega_direct_packing.py:88–195](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/vggt_omega_direct_packing.py:88)。 |
+| 17 tokens 放在 visual tokens 前 | SceneDistill 已有按帧切分 final merged visual embeds、再 prepend direct tokens 的函数，[vggt_omega_direct_packing.py:292–320](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/vggt_omega_direct_packing.py:292)。新增 placeholder 的 label 为 `-100`、attention 为 `1`，MRoPE 使用对应帧的空间中心坐标，[vggt_omega_direct_packing.py:88–195](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/vggt_omega_direct_packing.py:88)。 |
 | 视频帧顺序和跨视频边界 | 数据集将视频转换为多张连续 image frames，[data_qwen.py:463–481](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:463)；collator 以相同顺序拼接 Qwen frames，同时保留每个样本独立的 `geometry_encoder_inputs`，[data_qwen.py:666–725](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:666)。这可以直接得到 `video_sizes` 并防止不同视频之间发生 global attention。 |
 
 ## 3. 核心实现
@@ -70,7 +70,7 @@ $$
 
 - `NUM_SCENE_TOKENS = 16`
 - `NUM_SPECIAL_TOKENS = 17`
-- `PRE_VISION_BLOCK_INDICES = (0,4,8,12)`
+- `PRE_VISION_BLOCK_INDICES = (1,5,9,13)`；这里是 Transformers `hidden_states` tuple 索引，对应 zero-based Vision block `0,4,8,12` 的输出
 - `STREAM_DIM = 1024`
 - `FEATURE_DIM = 2048`
 - `NUM_HEADS = 16`
@@ -94,7 +94,7 @@ special_tokens: (T_total, 17, 1024)
 
 ### 3.2 四组 GCTE
 
-从 CamDistill 小修改复制 `SceneDistillPreFrameCrossAttentionLayer`：
+从 CamDistill 小修改得到公用 `FrameCrossAttentionLayer`：
 
 - 将输入从 `(T,1,D)` 泛化为 `(T,17,D)`。
 - Q reshape 为 `(group, heads, 17, head_dim)`。
@@ -225,7 +225,7 @@ student_embeds: (T_total, 17, text_hidden_size)
 直接调用：
 
 - `expand_image_embeds_with_direct_tokens(..., insert_position="front")`
-- `expand_visual_placeholders(..., num_extra_per_frame=17, insert_position="front")`
+- `expand_visual_placeholders(..., num_extra_per_frame=17, insert_position="front")`；新增位置固定使用帧中心 MRoPE
 
 现有 wrapper 已展示完整的 placeholder 扩展、masked scatter 和 language-model 输入流程，[modeling_qwen3_5_vggt_omega_direct.py:221–318](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:221)。SceneDistill 路径不提供 `back` 模式，配置不是 `front` 时直接拒绝。
 
@@ -324,7 +324,7 @@ insert position=front
 4. **四层提取**
 
    - mock Qwen Vision 输出 24 层可区分 tensor。
-   - 只检查并消费代码索引 `[0,4,8,12]`。
+   - 只检查并消费 `hidden_states` tuple 索引 `[1,5,9,13]`，对应 block `[0,4,8,12]` 的输出。
    - 输入 GCTE 的是 pre-merger raw tokens，最终拼接使用的是 `pooler_output` merged tokens。
    - 层数量、token 总数或 hidden width 不符合契约时 fail fast。
 
