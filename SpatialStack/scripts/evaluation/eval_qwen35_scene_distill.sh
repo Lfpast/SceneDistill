@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen35_output/SceneDistill-stage1-005}"
+export MODEL_PATH="${MODEL_PATH:-/project/peilab/jys/qwen35_output/SceneDistill-stage1-01}"
 export MODEL_IMPL="${MODEL_IMPL:-qwen3_5_scene_distill}"
 export BENCHMARKS="${BENCHMARKS:-vsibench,cvbench,blink_spatial,sparbench,videomme,mmsibench}"
 export SCENE_DISTILL_STAGE1_COMPATIBILITY="${SCENE_DISTILL_STAGE1_COMPATIBILITY:-true}"
