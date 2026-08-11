@@ -476,7 +476,7 @@ sbatch \
 ```
 
 ### 4.6 评估脚本
-目前还不用更新`eval_qwen35_scene_distill.sh`,因为旧架构(只有stage1)的模型还没有评估.我害怕更新后不兼容.等需要更新的时候我会告知你.单独处理这件事.
+`eval_qwen35_scene_distill.sh` 直接评估 Stage 2 checkpoint，不再保留旧 Stage 1 checkpoint 的 key mapping。
 
 ## 5. 明确不改的部分
 

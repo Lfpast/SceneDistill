@@ -124,10 +124,7 @@ def align_qwen3_5_geometry_modules(model):
     return model
 
 
-def _iter_qwen3_5_checkpoint_files(
-    pretrained_model_name_or_path: str,
-    state_keywords: Sequence[str] = GEOMETRY_STATE_KEYWORDS,
-) -> List[Path]:
+def _iter_qwen3_5_checkpoint_files(pretrained_model_name_or_path: str) -> List[Path]:
     checkpoint_path = Path(pretrained_model_name_or_path)
     if checkpoint_path.is_file():
         return [checkpoint_path]
@@ -153,7 +150,7 @@ def _iter_qwen3_5_checkpoint_files(
             weight_map = json.load(handle).get("weight_map", {})
         files = []
         for key, filename in weight_map.items():
-            if any(keyword in key for keyword in state_keywords):
+            if any(keyword in key for keyword in GEOMETRY_STATE_KEYWORDS):
                 files.append(checkpoint_path / filename)
         return sorted(set(files))
 
@@ -239,16 +236,8 @@ def _validate_qwen3_5_vision_language_fusion_checkpoint(
     )
 
 
-def _load_qwen3_5_geometry_submodules(
-    model,
-    pretrained_model_name_or_path: str,
-    state_keywords: Sequence[str] = GEOMETRY_STATE_KEYWORDS,
-    key_mapper=None,
-) -> int:
-    checkpoint_files = _iter_qwen3_5_checkpoint_files(
-        pretrained_model_name_or_path,
-        state_keywords=state_keywords,
-    )
+def _load_qwen3_5_geometry_submodules(model, pretrained_model_name_or_path: str) -> int:
+    checkpoint_files = _iter_qwen3_5_checkpoint_files(pretrained_model_name_or_path)
     if not checkpoint_files:
         return 0
 
@@ -260,18 +249,16 @@ def _load_qwen3_5_geometry_submodules(
         if suffixes and suffixes[-1] == ".safetensors":
             with safe_open(checkpoint_file, framework="pt", device="cpu") as handle:
                 sub_state_dict = {
-                    (key_mapper(key) if key_mapper is not None else key): handle.get_tensor(key)
+                    key: handle.get_tensor(key)
                     for key in handle.keys()
-                    if any(keyword in key for keyword in state_keywords)
-                    and (key_mapper(key) if key_mapper is not None else key) in model_keys
+                    if key in model_keys and any(keyword in key for keyword in GEOMETRY_STATE_KEYWORDS)
                 }
         else:
             state_dict = torch.load(checkpoint_file, map_location="cpu", weights_only=True)
             sub_state_dict = {
-                (key_mapper(key) if key_mapper is not None else key): value
+                key: value
                 for key, value in state_dict.items()
-                if any(keyword in key for keyword in state_keywords)
-                and (key_mapper(key) if key_mapper is not None else key) in model_keys
+                if key in model_keys and any(keyword in key for keyword in GEOMETRY_STATE_KEYWORDS)
             }
 
         if not sub_state_dict:

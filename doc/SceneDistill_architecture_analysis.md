@@ -688,7 +688,6 @@ Stage 2 checkpoint 的正常 evaluation 应使用：
 
 ```text
 model_impl = qwen3_5_scene_distill
-scene_distill_stage1_compatibility = false
 ```
 
 adapter 会固定：
@@ -711,7 +710,7 @@ Qwen Vision + Pre-GCTE + Pre projector + Qwen LLM + lm_head
 
 首个 prefill step 完成 17-token 注入并建立 KV cache；后续每生成一个文本 token，只执行必要的 LLM decode。
 
-当前 [eval_qwen35_scene_distill.sh](../SpatialStack/scripts/evaluation/eval_qwen35_scene_distill.sh) 指向旧 `SceneDistill-stage1-005`，并显式设置 `scene_distill_stage1_compatibility=true`。这是 Stage 1 checkpoint 的兼容入口，不是 Stage 2 checkpoint 的完整加载配置。
+当前 [eval_qwen35_scene_distill.sh](../SpatialStack/scripts/evaluation/eval_qwen35_scene_distill.sh) 直接加载 Stage 2 checkpoint，不再提供 Stage 1 checkpoint key mapping。
 
 ## 15. Checkpoint 契约
 
@@ -739,8 +738,6 @@ Teacher 在训练开始时由 `geometry_encoder_path` 单独加载；evaluation 
 scene_distill_pre_module
 scene_distill_post_module
 ```
-
-Stage 1 compatibility 是独立的 legacy 逻辑：旧 `scene_distill_module.*` 会映射到 `scene_distill_pre_module.*`，同时关闭 Post loss。它不改变本文所述的 Stage 2 结构定义。
 
 ## 16. 结构约束与运行时检查
 

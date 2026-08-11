@@ -40,23 +40,6 @@ from .vggt_omega_direct_packing import (
 
 
 SCENE_DISTILL_ENCODER_TYPE = "scene_distill"
-STAGE1_SCENE_DISTILL_STATE_KEYWORD = "scene_distill_module"
-STAGE1_SCENE_DISTILL_KEY_RENAMES = (
-    ("model.scene_distill_module.", "model.scene_distill_pre_module."),
-    (".camera_token", ".pre_camera_token"),
-    (".scene_token", ".pre_scene_token"),
-    (".frame_layers.", ".pre_frame_layers."),
-    (".global_layers.", ".pre_global_layers."),
-    (".projector.", ".pre_projector."),
-)
-
-
-def map_stage1_scene_distill_state_key(key: str) -> str:
-    """Map a Stage 1 SceneDistill checkpoint key onto the current Pre module."""
-    mapped_key = key
-    for old_name, new_name in STAGE1_SCENE_DISTILL_KEY_RENAMES:
-        mapped_key = mapped_key.replace(old_name, new_name, 1)
-    return mapped_key
 
 
 def is_scene_distill_geometry_encoder(geometry_encoder_type: str) -> bool:
@@ -451,32 +434,15 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        config = kwargs.get("config")
-        stage1_compatibility = bool(
-            getattr(config, "scene_distill_stage1_compatibility", False)
-        )
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
         architectures = getattr(model.config, "architectures", None) or []
         if cls.__name__ in architectures:
             checkpoint_root = _resolve_qwen3_5_checkpoint_root(pretrained_model_name_or_path)
-            if stage1_compatibility:
-                loaded_keys = _load_qwen3_5_geometry_submodules(
-                    model,
-                    checkpoint_root,
-                    state_keywords=(STAGE1_SCENE_DISTILL_STATE_KEYWORD,),
-                    key_mapper=map_stage1_scene_distill_state_key,
-                )
-            else:
-                loaded_keys = _load_qwen3_5_geometry_submodules(model, checkpoint_root)
+            loaded_keys = _load_qwen3_5_geometry_submodules(model, checkpoint_root)
             if loaded_keys == 0:
-                expected_weights = (
-                    "legacy scene_distill_module"
-                    if stage1_compatibility
-                    else "scene_distill_pre_module or scene_distill_post_module"
-                )
                 raise RuntimeError(
                     "SceneDistill checkpoint declares the SceneDistill architecture but contains no "
-                    f"{expected_weights} weights."
+                    "scene_distill_pre_module or scene_distill_post_module weights."
                 )
         return align_qwen3_5_scene_distill_modules(model)
 
@@ -587,8 +553,6 @@ __all__ = [
     "Qwen3_5ForConditionalGenerationWithSceneDistill",
     "Qwen3_5ModelWithSceneDistill",
     "SCENE_DISTILL_ENCODER_TYPE",
-    "STAGE1_SCENE_DISTILL_KEY_RENAMES",
     "align_qwen3_5_scene_distill_modules",
     "is_scene_distill_geometry_encoder",
-    "map_stage1_scene_distill_state_key",
 ]

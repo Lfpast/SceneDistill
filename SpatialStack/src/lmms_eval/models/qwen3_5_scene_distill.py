@@ -11,11 +11,9 @@ class Qwen3_5SceneDistill(Qwen3_5):
     def __init__(
         self,
         compatibility_geometry_encoder_type: str = "scene_distill",
-        scene_distill_stage1_compatibility: bool = False,
         **kwargs,
     ) -> None:
         self._compatibility_geometry_encoder_type = compatibility_geometry_encoder_type
-        self._stage1_compatibility = bool(scene_distill_stage1_compatibility)
         kwargs.pop("geometry_encoder_path", None)
         super().__init__(**kwargs)
 
@@ -44,18 +42,9 @@ class Qwen3_5SceneDistill(Qwen3_5):
         setattr(config, "geometry_token_insert_position", "front")
         setattr(config, "reference_frame", "first")
         setattr(config, "geometry_encoder_path", None)
-        if self._stage1_compatibility:
-            setattr(config, "pre_distill_weight", float(getattr(config, "distill_weight", 0.05)))
-            setattr(config, "post_distill_weight", 0.0)
-            setattr(config, "scene_distill_stage1_compatibility", True)
 
         eval_logger.warning(
             "Using qwen3_5_scene_distill student-only evaluation; VGGT-Omega teacher weights "
             "will not be constructed or loaded."
         )
-        if self._stage1_compatibility:
-            eval_logger.warning(
-                "Stage 1 compatibility is enabled: legacy scene_distill_module weights will be "
-                "mapped to the current scene_distill_pre_module for evaluation."
-            )
         return config, None

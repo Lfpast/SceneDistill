@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-FORCE_OUTPUT_PATH="${FORCE_OUTPUT_PATH:-/project/peilab/jys/qwen35_output/eval/SceneDistill-stage1-01}"
+FORCE_OUTPUT_PATH="${FORCE_OUTPUT_PATH:-/project/peilab/jys/qwen35_output/eval/SceneDistill-02}"
 cd "${PROJECT_ROOT}"
 
 set_default_env() {
