@@ -707,6 +707,58 @@ def test_scene_wrapper_hard_migrates_config_fields(monkeypatch):
     assert saved_config["post_distill_weight"] == POST_DISTILL_WEIGHT
 
 
+def test_scene_distill_teacher_is_constructed_only_with_a_training_path(monkeypatch):
+    scene_wrapper = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_scene_distill"
+    )
+    model_class = scene_wrapper.Qwen3_5ModelWithSceneDistill
+    teacher = nn.Identity()
+    teacher_paths = []
+
+    def create_teacher(**kwargs):
+        teacher_paths.append(kwargs["model_path"])
+        return teacher
+
+    monkeypatch.setattr(scene_wrapper, "create_geometry_encoder", create_teacher)
+    monkeypatch.setattr(scene_wrapper, "SceneDistillPreModule", lambda **kwargs: nn.Identity())
+    monkeypatch.setattr(scene_wrapper, "SceneDistillPostModule", lambda **kwargs: nn.Identity())
+
+    def make_model(geometry_encoder_path):
+        model = object.__new__(model_class)
+        nn.Module.__init__(model)
+        model.config = SimpleNamespace(
+            geometry_encoder_type="scene_distill",
+            geometry_encoder_path=geometry_encoder_path,
+            geometry_token_insert_position="front",
+            geometry_direct_token_mode="special17",
+            reference_frame="first",
+            geometry_encoder_freeze=True,
+            pre_distill_weight=PRE_DISTILL_WEIGHT,
+            post_distill_weight=POST_DISTILL_WEIGHT,
+            vision_config=SimpleNamespace(hidden_size=6),
+            text_config=SimpleNamespace(hidden_size=8, num_hidden_layers=25),
+        )
+        model.geometry_encoder = None
+        model.scene_distill_pre_module = None
+        model.scene_distill_post_module = None
+        model._geometry_modules_initialized = False
+        return model
+
+    eval_model = make_model(None)
+    eval_model.initialize_geometry_modules()
+    assert eval_model.geometry_encoder is None
+    assert eval_model.scene_distill_pre_module is not None
+    assert eval_model.scene_distill_post_module is not None
+    assert teacher_paths == []
+    with pytest.raises(RuntimeError, match="training requires a VGGT-Omega teacher"):
+        eval_model._collect_teacher_features([torch.zeros(1)], torch.device("cpu"))
+
+    train_model = make_model("facebook/VGGT-Omega")
+    train_model.initialize_geometry_modules()
+    assert train_model.geometry_encoder is teacher
+    assert teacher_paths == ["facebook/VGGT-Omega"]
+
+
 def test_outer_wrapper_applies_independent_losses_and_clears_transients():
     scene_wrapper = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5_scene_distill"
@@ -909,6 +961,7 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
     assert model.language_model.capture_requests[-1] is None
 
     teacher_calls["count"] = 0
+    model.geometry_encoder = None
     model(
         **forward_inputs,
         compute_pre_distill_loss=False,

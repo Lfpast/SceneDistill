@@ -275,6 +275,8 @@ def main():
     model_family = resolve_model_family(config)
     use_geometry_model = getattr(config, "use_geometry_encoder", False) or getattr(config, "use_vggt_feature", False)
     geometry_encoder_type = getattr(config, "geometry_encoder_type", "vggt")
+    if geometry_encoder_type == "scene_distill":
+        config.geometry_encoder_path = None
     model_class = resolve_model_class(model_family, use_geometry_model, geometry_encoder_type)
     if model_family == "qwen3_5":
         patch_qwen3_5_flash_attention()

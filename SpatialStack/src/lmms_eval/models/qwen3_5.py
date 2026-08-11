@@ -204,7 +204,7 @@ class Qwen3_5(lmms):
             "torch_dtype": torch.bfloat16,
             "device_map": self.device_map,
         }
-        if use_geometry_model:
+        if use_geometry_model and geometry_encoder_path:
             load_kwargs["geometry_encoder_path"] = geometry_encoder_path
 
         if use_flash_attention_2:

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from transformers.cache_utils import Cache
 
-from .geometry_encoders import GeometryEncoderConfig, create_geometry_encoder
+from .geometry_encoders import create_geometry_encoder
 from .modeling_qwen3_5 import (
     Qwen3_5CausalLMOutputWithPast,
     Qwen3_5ForConditionalGenerationWithGeometry,
@@ -127,20 +127,15 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
 
         config = self.config
         self._validate_geometry_config(config)
-        encoder_config = GeometryEncoderConfig(
-            encoder_type="vggt_omega_direct",
-            model_path=getattr(config, "geometry_encoder_path", None),
-            reference_frame="first",
-            freeze_encoder=True,
-            encoder_kwargs={"direct_token_mode": "special17"},
-        )
-        self.geometry_encoder = create_geometry_encoder(
-            encoder_type=encoder_config.encoder_type,
-            model_path=encoder_config.model_path,
-            reference_frame=encoder_config.reference_frame,
-            freeze_encoder=encoder_config.freeze_encoder,
-            **encoder_config.encoder_kwargs,
-        )
+        geometry_encoder_path = getattr(config, "geometry_encoder_path", None)
+        if geometry_encoder_path:
+            self.geometry_encoder = create_geometry_encoder(
+                encoder_type="vggt_omega_direct",
+                model_path=geometry_encoder_path,
+                reference_frame="first",
+                freeze_encoder=True,
+                direct_token_mode="special17",
+            )
         self.scene_distill_pre_module = SceneDistillPreModule(
             visual_dim=int(config.vision_config.hidden_size),
             text_hidden_dim=int(config.text_config.hidden_size),
@@ -228,6 +223,8 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
         geometry_encoder_inputs: List[torch.Tensor],
         target_device: torch.device,
     ) -> torch.Tensor:
+        if self.geometry_encoder is None:
+            raise RuntimeError("SceneDistill training requires a VGGT-Omega teacher.")
         teacher_features = []
         for sample_inputs in geometry_encoder_inputs:
             teacher_features.append(self.geometry_encoder.encode(sample_inputs).to(device=target_device))
@@ -285,14 +282,12 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
         if inputs_embeds is not None:
             raise ValueError("SceneDistill does not support precomputed inputs_embeds on the first visual step.")
         if geometry_encoder_inputs is None:
-            raise ValueError("SceneDistill requires geometry_encoder_inputs for frame grouping and teacher targets.")
+            raise ValueError(
+                "SceneDistill requires geometry_encoder_inputs for frame grouping and training-time teacher targets."
+            )
 
         inputs_embeds = self.get_input_embeddings()(input_ids)
-        if (
-            self.geometry_encoder is None
-            or self.scene_distill_pre_module is None
-            or self.scene_distill_post_module is None
-        ):
+        if self.scene_distill_pre_module is None or self.scene_distill_post_module is None:
             self.initialize_geometry_modules()
         self.align_geometry_modules(inputs_embeds)
 

@@ -234,7 +234,6 @@ Evaluate a trained checkpoint with:
 
 ```bash
 MODEL_PATH=./output/SceneDistill-stage1 \
-GEOMETRY_ENCODER_PATH=facebook/VGGT-Omega \
 bash scripts/evaluation/eval_qwen35_scene_distill.sh
 ```
 
