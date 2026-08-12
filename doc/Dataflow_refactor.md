@@ -7,9 +7,9 @@
 | 契约 | 当前实现与依据 |
 |---|---|
 | 完整 processor 原生 video tokenization | [data_qwen.py:76](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:76) 直接生成 `pixel_values_videos`、`video_grid_thw`、`mm_token_type_ids`；不再生成手工 `position_ids` |
-| 单图、图片序列、视频、帧目录统一采样 | [data_qwen.py:287](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:287) 只保留真实帧并构造 `VideoMetadata`；[utils.py:21](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/utils.py:21) 对同一视频统一 resize |
-| annotation 到逻辑视频的规范化 | [data_qwen.py:376](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:376) 先把旧逐帧 `<image>` markers 折叠成逻辑视频 placeholders，再进入 processor；raw marker 数不再被误当成视频数 |
-| 多个独立视频 | [data_qwen.py:382](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:382) 按 placeholder 顺序生成视频列表；[data_qwen.py:509](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:509) 按同一顺序展平 grid 与 teacher 输入 |
+| 单图、已标注图片序列、原始视频统一装载 | [data_qwen.py:302](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:302) 保留已标注序列的完整帧索引，仅对原始视频/帧目录采样并构造 `VideoMetadata`；[utils.py:21](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/utils.py:21) 对同一视频统一 resize |
+| annotation 到逻辑视频的规范化 | [data_qwen.py:394](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:394) 先把旧逐帧 `<image>` markers 折叠成逻辑视频 placeholders，再进入 processor；raw marker 数不再被误当成视频数 |
+| 多个独立视频 | [data_qwen.py:400](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:400) 按 placeholder 顺序生成视频列表；[data_qwen.py:527](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:527) 按同一顺序展平 grid 与 teacher 输入 |
 | 原生 temporal pooling 与 MRoPE | [modeling_qwen3_5_scene_distill.py:315](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:315) 调用 `get_video_features`；[modeling_qwen3_5_scene_distill.py:360](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:360) 调用 Qwen3.5 原生 `compute_3d_position_ids` |
 | 每视频 teacher 时间对齐 | [modeling_qwen3_5_scene_distill.py:201](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:201) 实现不变、严格 2:1 相邻平均、非 2:1 adaptive average pooling 和非法上采样报错四种情况 |
 | Student-only 原生 video 评估 | [qwen3_5.py:288](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:288)、[qwen3_5.py:310](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:310)、[qwen3_5.py:367](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:367)；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
@@ -73,7 +73,7 @@ geometry_encoder_inputs = [
 
 ### 2.2 帧采样
 
-每个真实视频独立执行：
+原始视频文件和未预采样的帧目录独立执行：
 
 ```text
 target_fps = 1 / base_interval = 1 FPS
@@ -84,6 +84,8 @@ frame_indices = uniform_sample(0, total_frames - 1, target_frames)
 
 - `video_min_frames=8` 是有足够原始帧时的采样下限，不通过重复帧把短视频强行补到8帧。
 - 单图保持1帧；短视频保留实际可采到的帧数。
+- `images: List[image]` 是 annotation 已经选定并排序的完整视频序列，不再执行第二次 `video_max_frames` 采样。SPAR 的 `point_img_idx`、`bbox_img_idx`、问题中的 `Frame-N` 和监督答案都以这个原始列表为索引空间，二次采样会同时破坏视觉标记、文本和答案语义。
+- 例如32帧 SPAR 序列仍以32个真实帧进入原生 video processor；Qwen `temporal_patch_size=2` 将其变成16个 temporal groups，VGGT 的32帧 special tokens再按严格2:1相邻平均对齐到这16组。这正是 temporal pooling，不会恢复旧多图路径。
 - 视频文件保留原始 FPS 和采样下标，使 timestamp 对应真实时间。
 - 帧目录和显式图片列表没有可靠的真实 FPS，使用 `sample_fps=1`。
 - SceneDistill采样代码不得主动 `repeat/duplicate` 帧；采样结果原样同时交给 Qwen和 VGGT。
@@ -175,7 +177,7 @@ geometry_encoder_inputs: 按 batch 和 placeholder 顺序展平的 List[Tensor]
 - 将 `read_video_images` 的有效读取逻辑合并进重写后的 `process_video`，随后删除 `read_video_images`，不保留两个职责重叠的视频入口。
 - 直接重写 `_get_item`：删除 `video → images → 多个 <image>` 改写、整个 image dataflow和不可达的旧 video branch，[data_qwen.py:456–620](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:456)。新实现按 placeholder 顺序循环处理 $N_v$ 个视频，然后一次调用完整 processor。
 - 多视频样本的 `pixel_values_videos`、`video_grid_thw` 和 geometry inputs保持相同顺序；不限制为单视频。
-- 静态 length estimate阶段还没有 `video_grid_thw`，不能假装能读取真实 $T_q$。它按采样上限估计 temporal-group数，并用 `video_max_frame_pixels / (patch_size × merge_size)^2 + 17` 推导每组的视觉 token与注入 token预算，[data_qwen.py:243–259](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:243)；真实 packing和所有运行时校验只使用processor返回的 `video_grid_thw[:,0]`。
+- 静态 length estimate阶段还没有 `video_grid_thw`，不能假装能读取真实 $T_q$。它对原始视频按采样上限估计 temporal-group数，对 `images` 标注序列按完整列表长度估计，并用 `video_max_frame_pixels / (patch_size × merge_size)^2 + 17` 推导每组的视觉 token与注入 token预算，[data_qwen.py:186](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:186)、[data_qwen.py:244](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:244)；真实 packing和所有运行时校验只使用processor返回的 `video_grid_thw[:,0]`。
 - 直接重写 `DataCollatorForSupervisedDataset`：删除 image字段和手工 `position_ids` collate；加入 `mm_token_type_ids` padding，并展平多视频 geometry list。
 - 删除 `DataCollatorForFlattenedSupervisedDataset` 以及 `data_flatten` 分支。SceneDistill codebase只保留一种 collator，不再以报错方式保留旧功能。
 - 删除上述重写后不再使用的 image constants、imports和 helper调用，保证文件中只有 SceneDistill native video dataflow。
@@ -336,6 +338,7 @@ rg -n "VIDEO_MAX_FRAMES|VIDEO_MIN_FRAMES|BASE_INTERVAL|VIDEO_MAX_FRAME_PIXELS|VI
 在具备 SpatialStack环境后的首个训练任务中，再检查以下运行时事实，但不将其伪装成本地测试结果：
 
 - 16帧视频的 `video_grid_thw[:,0]` 与模型 temporal groups一致。
+- 32帧 SPAR annotation序列保留原始 `point_img_idx` / `bbox_img_idx`，并产生16个 Qwen temporal groups；不得先截断为16帧再访问原索引。
 - 多视频样本的 placeholder、grid rows和 geometry tensors一一对应。
 - 严格2:1 teacher使用相邻两帧平均；非2:1 teacher使用 adaptive average pooling。
 - teacher、Pre和Post输出均为 `[sum(Tq_i),17,2048]`。
