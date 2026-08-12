@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=SceneDistill-stage3-005
+#SBATCH --job-name=SceneDistill-005
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --time=14:00:00
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/SceneDistill-stage3-005.out
+#SBATCH --output=slurm_logs/SceneDistill-005.out
 # ============================================================================
 # SceneDistill (spetial17 变体): 把 VGGT-Omega 的 17 个 camera + scene token
 # 拼到每帧 visual span 前并蒸馏.
@@ -19,18 +19,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-module load slurm
-module load cuda12.2/toolkit/12.2.2
-source activate spatialstack
-cd "${PROJECT_ROOT}"
-export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
-export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
-export SS_ROOT=/project/peilab/jys/spatialstack_store
-export HF_HOME=$SS_ROOT/hf_cache
-export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
-export HF_XET_HIGH_PERFORMANCE=1
-export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
-export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
+# module load slurm
+# module load cuda12.2/toolkit/12.2.2
+# source activate spatialstack
+# cd "${PROJECT_ROOT}"
+# export LD_LIBRARY_PATH=$(python -c "import os, glob; paths=[os.path.abspath(x) for x in glob.glob('/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/*/lib')]; print(':'.join(paths))"):$LD_LIBRARY_PATH
+# export REPO_ROOT=/home/yjiaag/SceneDistill/SpatialStack
+# export SS_ROOT=/project/peilab/jys/spatialstack_store
+# export HF_HOME=$SS_ROOT/hf_cache
+# export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+# export HF_XET_HIGH_PERFORMANCE=1
+# export LD_PRELOAD=/home/yjiaag/.conda/envs/spatialstack/lib/python3.12/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12
+# export PYTHONPATH=$PWD/src:${PYTHONPATH:-}
 
 export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-4B}"
 export USE_GEOMETRY_ENCODER=True
@@ -49,11 +49,11 @@ export VISION_LANGUAGE_FUSION_LAYERS=""
 export TUNE_MM_LLM=True
 export TUNE_MM_MLP=False
 export TUNE_MM_VISION=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage3-005}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/temp}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
 
 export WANDB_PROJECT="SceneDistill"
-export WANDB_MODE="online"
+export WANDB_MODE="offline"
 export WANDB_LOCAL_ROOT="${TMPDIR:-/tmp}/SceneDistill-wandb"
 export WANDB_DIR="${WANDB_LOCAL_ROOT}/runs"
 export WANDB_CACHE_DIR="${WANDB_LOCAL_ROOT}/cache"
