@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=SceneDistill-multinode-02
+#SBATCH --job-name=SceneDistill-multinode-stage3-01
 #SBATCH --partition=normal
 #SBATCH --account=peilab
-#SBATCH --nodes=3
-#SBATCH --gpus-per-node=2
+#SBATCH --nodes=2
+#SBATCH --gpus-per-node=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=18:00:00
-#SBATCH --output=slurm_logs/SceneDistill-multinode-02.out
+#SBATCH --output=slurm_logs/SceneDistill-multinode-stage3-01.out
 # ============================================================================
 # SceneDistill multi-node training (default: 3 nodes x 2 GPUs).
 # Submit from SpatialStack with:
@@ -42,8 +42,8 @@ export GEOMETRY_ENCODER_FREEZE=True
 export REFERENCE_FRAME=first
 export GEOMETRY_DIRECT_TOKEN_MODE=special17
 export GEOMETRY_TOKEN_INSERT_POSITION=front
-export PRE_DISTILL_WEIGHT="${PRE_DISTILL_WEIGHT:-0.2}"
-export POST_DISTILL_WEIGHT="${POST_DISTILL_WEIGHT:-0.05}"
+export PRE_DISTILL_WEIGHT="${PRE_DISTILL_WEIGHT:-0.1}"
+export POST_DISTILL_WEIGHT="${POST_DISTILL_WEIGHT:-0.1}"
 export FEATURE_FUSION_METHOD=none
 export GEOMETRY_ENCODER_LAYERS=""
 export GEOMETRY_FUSION_LAYERS=""
@@ -52,7 +52,7 @@ export DATA_FLATTEN=False
 export TUNE_MM_LLM=True
 export TUNE_MM_MLP=False
 export TUNE_MM_VISION=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage1-02}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage3-01}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
 
 export WANDB_PROJECT="SceneDistill"
@@ -66,6 +66,6 @@ export WANDB_CONSOLE="off"
 export WANDB_DISABLE_GIT="true"
 export WANDB_DISABLE_CODE="true"
 
-export MASTER_PORT="${MASTER_PORT:-28500}"
+export MASTER_PORT="${MASTER_PORT:-30500}"
 
 bash "/home/yjiaag/SceneDistill/SpatialStack/scripts/train/train_multinode.sh"

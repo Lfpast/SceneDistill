@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=SceneDistill-02
+#SBATCH --job-name=SceneDistill-stage3-005
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --time=14:00:00
 #SBATCH --account=peilab
-#SBATCH --output=slurm_logs/SceneDistill-02.out
+#SBATCH --output=slurm_logs/SceneDistill-stage3-005.out
 # ============================================================================
 # SceneDistill (spetial17 变体): 把 VGGT-Omega 的 17 个 camera + scene token
 # 拼到每帧 visual span 前并蒸馏.
@@ -40,7 +40,7 @@ export GEOMETRY_ENCODER_FREEZE=True
 export REFERENCE_FRAME=first
 export GEOMETRY_DIRECT_TOKEN_MODE=special17
 export GEOMETRY_TOKEN_INSERT_POSITION=front
-export PRE_DISTILL_WEIGHT="${PRE_DISTILL_WEIGHT:-0.2}"
+export PRE_DISTILL_WEIGHT="${PRE_DISTILL_WEIGHT:-0.05}"
 export POST_DISTILL_WEIGHT="${POST_DISTILL_WEIGHT:-0.05}"
 export FEATURE_FUSION_METHOD=none
 export GEOMETRY_ENCODER_LAYERS=""
@@ -50,7 +50,7 @@ export DATA_FLATTEN=False
 export TUNE_MM_LLM=True
 export TUNE_MM_MLP=False
 export TUNE_MM_VISION=False
-export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-02}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage3-005}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
 
 export WANDB_PROJECT="SceneDistill"
