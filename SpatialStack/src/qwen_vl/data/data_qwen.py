@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import random
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Dict, List
@@ -388,19 +389,40 @@ class LazySupervisedDataset(Dataset):
                 visual_objects = [visual_value]
 
         conversations = sample["conversations"]
-        placeholder_count = sum(
+        annotation_placeholder_count = sum(
             message.get("value", message.get("content", "")).count(DEFAULT_IMAGE_TOKEN)
             + message.get("value", message.get("content", "")).count(DEFAULT_VIDEO_TOKEN)
             for message in conversations
         )
-        if visual_objects and placeholder_count == 0:
+        if visual_objects and annotation_placeholder_count == 0:
+            inserted = False
             for message in conversations:
                 role = message.get("from", message.get("role"))
                 if role in {"human", "user"}:
                     key = "value" if "value" in message else "content"
                     message[key] = DEFAULT_VIDEO_TOKEN * len(visual_objects) + "\n" + message[key]
+                    inserted = True
                     break
-        elif len(visual_objects) > 1 and placeholder_count == 1:
+            if not inserted:
+                raise ValueError("SceneDistill cannot attach visual inputs without a user message.")
+        elif len(visual_objects) == 1 and annotation_placeholder_count > 1:
+            kept_placeholder = False
+            for message in conversations:
+                key = "value" if "value" in message else "content"
+                parts = re.split(
+                    f"({re.escape(DEFAULT_IMAGE_TOKEN)}|{re.escape(DEFAULT_VIDEO_TOKEN)})",
+                    message[key],
+                )
+                for part_index, part in enumerate(parts):
+                    if part not in {DEFAULT_IMAGE_TOKEN, DEFAULT_VIDEO_TOKEN}:
+                        continue
+                    if not kept_placeholder:
+                        parts[part_index] = DEFAULT_VIDEO_TOKEN
+                        kept_placeholder = True
+                    else:
+                        parts[part_index] = ""
+                message[key] = "".join(parts)
+        elif len(visual_objects) > 1 and annotation_placeholder_count == 1:
             for message in conversations:
                 key = "value" if "value" in message else "content"
                 content = message[key]
@@ -408,10 +430,11 @@ class LazySupervisedDataset(Dataset):
                     token = DEFAULT_IMAGE_TOKEN if DEFAULT_IMAGE_TOKEN in content else DEFAULT_VIDEO_TOKEN
                     message[key] = content.replace(token, DEFAULT_VIDEO_TOKEN * len(visual_objects), 1)
                     break
-        elif placeholder_count != len(visual_objects):
+        elif annotation_placeholder_count != len(visual_objects):
             raise ValueError(
                 "SceneDistill placeholder/video mismatch: "
-                f"placeholders={placeholder_count}, logical_videos={len(visual_objects)}."
+                f"annotation_placeholders={annotation_placeholder_count}, "
+                f"logical_videos={len(visual_objects)}."
             )
 
         for message in conversations:

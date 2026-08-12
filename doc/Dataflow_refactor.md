@@ -8,7 +8,8 @@
 |---|---|
 | 完整 processor 原生 video tokenization | [data_qwen.py:76](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:76) 直接生成 `pixel_values_videos`、`video_grid_thw`、`mm_token_type_ids`；不再生成手工 `position_ids` |
 | 单图、图片序列、视频、帧目录统一采样 | [data_qwen.py:287](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:287) 只保留真实帧并构造 `VideoMetadata`；[utils.py:21](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/utils.py:21) 对同一视频统一 resize |
-| 多个独立视频 | [data_qwen.py:375](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:375) 按 placeholder 顺序生成视频列表；[data_qwen.py:459](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:459) 按同一顺序展平 grid 与 teacher 输入 |
+| annotation 到逻辑视频的规范化 | [data_qwen.py:376](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:376) 先把旧逐帧 `<image>` markers 折叠成逻辑视频 placeholders，再进入 processor；raw marker 数不再被误当成视频数 |
+| 多个独立视频 | [data_qwen.py:382](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:382) 按 placeholder 顺序生成视频列表；[data_qwen.py:509](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:509) 按同一顺序展平 grid 与 teacher 输入 |
 | 原生 temporal pooling 与 MRoPE | [modeling_qwen3_5_scene_distill.py:315](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:315) 调用 `get_video_features`；[modeling_qwen3_5_scene_distill.py:360](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:360) 调用 Qwen3.5 原生 `compute_3d_position_ids` |
 | 每视频 teacher 时间对齐 | [modeling_qwen3_5_scene_distill.py:201](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:201) 实现不变、严格 2:1 相邻平均、非 2:1 adaptive average pooling 和非法上采样报错四种情况 |
 | Student-only 原生 video 评估 | [qwen3_5.py:288](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:288)、[qwen3_5.py:310](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:310)、[qwen3_5.py:367](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:367)；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
@@ -63,10 +64,12 @@ geometry_encoder_inputs = [
 
 三个视频分别参与 temporal pooling、teacher 对齐和 GCTE global attention，不跨视频做 pooling 或 attention。placeholder规则固定为：
 
-- `images: List[image]` 表示一个有序视频，只对应一个 `<video>` placeholder。
-- `video: List[video_file]` 表示多个独立视频；若原对话只有一个 `<video>` placeholder，就在该位置展开成 $N_v$ 个连续 `<video>` placeholders。
-- 若原对话已经显式提供多个 placeholders，则数量必须与视频对象数一致并按出现顺序映射。
-- placeholder数量、`video_grid_thw` 行数和 geometry input数量最终必须完全一致，否则报错。
+- raw annotation marker 和送入 processor 的逻辑视频 placeholder 是两个层次。旧标注中的多个 `<image>` markers 可以逐帧描述同一个 `images: List[image]`，不能用 marker 数推断逻辑视频数。
+- `image`、`images: List[image]` 和标量 `video` 都表示一个逻辑视频。若 annotation 含多个旧 markers，则按对话顺序保留第一个位置并统一为一个 `<video>`，删除其余 marker token但保留周围文本。
+- `video: List[video_file]` 表示多个独立视频；若原对话只有一个视觉 marker，就在该位置展开成 $N_v$ 个连续 `<video>` placeholders。
+- 若有视觉输入但 annotation 没有 marker，则在第一个 user message前插入 $N_v$ 个 `<video>` placeholders；没有 user message属于无合法挂载位置，直接报错。
+- 若多个独立视频的 annotation 已显式提供多个 placeholders，则数量必须与视频对象数一致并按出现顺序映射；既不是1也不是 $N_v$ 的 marker 数具有歧义，直接报错。
+- annotation 规范化完成后，placeholder数量、`video_grid_thw` 行数和 geometry input数量最终必须完全一致，否则报错。
 
 ### 2.2 帧采样
 
