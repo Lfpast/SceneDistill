@@ -313,7 +313,7 @@ class SceneDistillPreModule(nn.Module):
 
 
 class SceneDistillPostModule(nn.Module):
-    """Six-stage post-LLM camera-scene GCTE distillation head."""
+    """Six-stage post-LLM camera-scene GCTE with internal injection."""
 
     def __init__(
         self,
@@ -331,12 +331,17 @@ class SceneDistillPostModule(nn.Module):
         self.llm_hidden_dim = int(llm_hidden_dim)
         self.special_dim = int(special_dim)
         self.feature_dim = 2 * self.special_dim
+        self.layer_indices = LLM_BLOCK_INDICES
         self.post_frame_layers = nn.ModuleList(
             FrameCrossAttentionLayer(self.special_dim, self.llm_hidden_dim, num_heads)
             for _ in range(POST_DISTILL_DEPTH)
         )
         self.post_global_layers = nn.ModuleList(
             GlobalSelfAttentionLayer(self.special_dim, num_heads)
+            for _ in range(POST_DISTILL_DEPTH)
+        )
+        self.post_injection_projections = nn.ModuleList(
+            nn.Linear(self.special_dim, self.llm_hidden_dim, bias=False)
             for _ in range(POST_DISTILL_DEPTH)
         )
         self.reset_parameters()
@@ -347,62 +352,72 @@ class SceneDistillPostModule(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
+        for projection in self.post_injection_projections:
+            nn.init.zeros_(projection.weight)
 
     def forward(
         self,
-        pre_global_tokens: torch.Tensor,
-        llm_layer_features: Sequence[torch.Tensor],
+        stage_index: int,
+        post_tokens: torch.Tensor,
+        llm_layer_features: torch.Tensor,
         frame_sizes: Sequence[int],
         video_sizes: Sequence[int],
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        stage_index = int(stage_index)
+        if stage_index < 0 or stage_index >= POST_DISTILL_DEPTH:
+            raise ValueError(
+                f"SceneDistill Post stage_index must be in [0, {POST_DISTILL_DEPTH - 1}], got {stage_index}."
+            )
+
         video_sizes = [int(size) for size in video_sizes]
         frame_sizes = [int(size) for size in frame_sizes]
         num_frames = sum(video_sizes)
         expected_pre_shape = (num_frames, NUM_SPECIAL_TOKENS, self.special_dim)
-        if pre_global_tokens.shape != expected_pre_shape:
+        if post_tokens.shape != expected_pre_shape:
             raise ValueError(
-                f"pre_global_tokens must have shape {expected_pre_shape}, got {pre_global_tokens.shape}."
+                f"post_tokens must have shape {expected_pre_shape}, got {post_tokens.shape}."
             )
         if len(frame_sizes) != num_frames or any(size <= NUM_SPECIAL_TOKENS for size in frame_sizes):
             raise ValueError(
                 "SceneDistill Post frame_sizes must contain one positive visual span plus "
                 f"{NUM_SPECIAL_TOKENS} special tokens per frame, got {frame_sizes}."
             )
-        if len(llm_layer_features) != POST_DISTILL_DEPTH:
-            raise ValueError(
-                f"SceneDistill Post requires {POST_DISTILL_DEPTH} LLM layers "
-                f"{LLM_BLOCK_INDICES}, got {len(llm_layer_features)}."
-            )
 
         expected_llm_tokens = sum(frame_sizes)
-        for layer_position, features in enumerate(llm_layer_features):
-            expected_shape = (expected_llm_tokens, self.llm_hidden_dim)
-            if features.shape != expected_shape:
-                raise ValueError(
-                    f"LLM layer {LLM_BLOCK_INDICES[layer_position]} features must have shape "
-                    f"{expected_shape}, got {features.shape}."
-                )
+        expected_shape = (expected_llm_tokens, self.llm_hidden_dim)
+        if llm_layer_features.shape != expected_shape:
+            raise ValueError(
+                f"LLM layer {LLM_BLOCK_INDICES[stage_index]} features must have shape "
+                f"{expected_shape}, got {llm_layer_features.shape}."
+            )
 
         reference_parameter = next(self.parameters())
-        post_tokens = pre_global_tokens.to(
+        post_tokens = post_tokens.to(
             device=reference_parameter.device,
             dtype=reference_parameter.dtype,
         )
-        post_after_frame = None
-        for layer_index, llm_features in enumerate(llm_layer_features):
-            llm_features = llm_features.to(device=post_tokens.device, dtype=post_tokens.dtype)
-            post_tokens = self.post_frame_layers[layer_index](post_tokens, llm_features, frame_sizes)
-            if layer_index == POST_DISTILL_DEPTH - 1:
-                post_after_frame = post_tokens
-            post_tokens = self.post_global_layers[layer_index](post_tokens, video_sizes)
+        llm_layer_features = llm_layer_features.to(device=post_tokens.device, dtype=post_tokens.dtype)
+        post_after_frame = self.post_frame_layers[stage_index](
+            post_tokens,
+            llm_layer_features,
+            frame_sizes,
+        )
+        post_after_global = self.post_global_layers[stage_index](post_after_frame, video_sizes)
+        injection_delta = self.post_injection_projections[stage_index](post_after_global)
 
-        post_features = torch.cat([post_after_frame, post_tokens], dim=-1)
-        expected_post_shape = (num_frames, NUM_SPECIAL_TOKENS, self.feature_dim)
-        if post_features.shape != expected_post_shape:
+        expected_special_shape = (num_frames, NUM_SPECIAL_TOKENS, self.special_dim)
+        expected_injection_shape = (num_frames, NUM_SPECIAL_TOKENS, self.llm_hidden_dim)
+        if post_after_frame.shape != expected_special_shape or post_after_global.shape != expected_special_shape:
             raise ValueError(
-                f"SceneDistill Post features must have shape {expected_post_shape}, got {post_features.shape}."
+                "SceneDistill Post special states must both have shape "
+                f"{expected_special_shape}, got {post_after_frame.shape} and {post_after_global.shape}."
             )
-        return post_features
+        if injection_delta.shape != expected_injection_shape:
+            raise ValueError(
+                f"SceneDistill injection delta must have shape {expected_injection_shape}, "
+                f"got {injection_delta.shape}."
+            )
+        return post_after_frame, post_after_global, injection_delta
 
 
 def scene_distillation_loss(student_features: torch.Tensor, teacher_features: torch.Tensor) -> torch.Tensor:

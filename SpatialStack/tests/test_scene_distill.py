@@ -236,6 +236,7 @@ def test_checkpoint_filter_removes_teacher_but_keeps_student():
         "geometry_encoder.vggt_omega.weight": torch.ones(1),
         "model.scene_distill_pre_module.pre_camera_token": torch.ones(1),
         "model.scene_distill_post_module.post_frame_layers.0.q_proj.weight": torch.ones(1),
+        "model.scene_distill_post_module.post_injection_projections.0.weight": torch.ones(1),
         "model.language_model.weight": torch.ones(1),
     }
 
@@ -244,6 +245,7 @@ def test_checkpoint_filter_removes_teacher_but_keeps_student():
     assert set(filtered) == {
         "model.scene_distill_pre_module.pre_camera_token",
         "model.scene_distill_post_module.post_frame_layers.0.q_proj.weight",
+        "model.scene_distill_post_module.post_injection_projections.0.weight",
         "model.language_model.weight",
     }
 
@@ -263,24 +265,54 @@ def test_post_module_shapes_and_gradients():
         for _ in LLM_BLOCK_INDICES
     ]
 
-    post_features = module(
-        pre_global_tokens,
-        llm_layer_features,
-        frame_sizes=frame_sizes,
-        video_sizes=[2, 1],
-    )
+    post_tokens = pre_global_tokens
+    injection_deltas = []
+    for stage_index, layer_features in enumerate(llm_layer_features):
+        post_after_frame, post_tokens, injection_delta = module(
+            stage_index,
+            post_tokens,
+            layer_features,
+            frame_sizes=frame_sizes,
+            video_sizes=[2, 1],
+        )
+        injection_deltas.append(injection_delta)
+    post_features = torch.cat([post_after_frame, post_tokens], dim=-1)
 
     assert LLM_BLOCK_INDICES == (4, 8, 12, 16, 20, 24)
     assert POST_DISTILL_DEPTH == 6
     assert post_features.shape == (3, NUM_SPECIAL_TOKENS, 16)
-    assert post_features[..., :8].shape == (3, NUM_SPECIAL_TOKENS, 8)
-    assert post_features[..., 8:].shape == (3, NUM_SPECIAL_TOKENS, 8)
+    assert all(delta.shape == (3, NUM_SPECIAL_TOKENS, 6) for delta in injection_deltas)
+    assert all(torch.count_nonzero(delta) == 0 for delta in injection_deltas)
 
     post_features.square().mean().backward()
     assert pre_global_tokens.grad is not None
     assert all(features.grad is not None for features in llm_layer_features)
     assert module.post_frame_layers[0].q_proj.weight.grad is not None
     assert module.post_global_layers[-1].qkv.weight.grad is not None
+
+
+def test_zero_gate_receives_sft_gradient_and_opens_post_gradient_path():
+    torch.manual_seed(10)
+    module = SceneDistillPostModule(llm_hidden_dim=6, special_dim=8, num_heads=2)
+    post_tokens = torch.randn(1, NUM_SPECIAL_TOKENS, 8, requires_grad=True)
+    llm_features = torch.randn(18, 6, requires_grad=True)
+
+    injection_delta = module(0, post_tokens, llm_features, [18], [1])[2]
+    injection_delta.sum().backward()
+
+    assert module.post_injection_projections[0].weight.grad.abs().sum() > 0
+    assert module.post_frame_layers[0].q_proj.weight.grad.abs().sum() == 0
+    assert post_tokens.grad.abs().sum() == 0
+
+    module.zero_grad(set_to_none=True)
+    post_tokens.grad = None
+    llm_features.grad = None
+    with torch.no_grad():
+        module.post_injection_projections[0].weight.fill_(0.1)
+    module(0, post_tokens, llm_features, [18], [1])[2].sum().backward()
+
+    assert module.post_frame_layers[0].q_proj.weight.grad.abs().sum() > 0
+    assert post_tokens.grad.abs().sum() > 0
 
 
 def test_post_frame_attention_uses_only_the_corresponding_frame_span():
@@ -298,20 +330,21 @@ def test_post_frame_attention_uses_only_the_corresponding_frame_span():
     ]
 
     baseline = module(
+        0,
         pre_global_tokens,
-        llm_layer_features,
+        llm_layer_features[0],
         frame_sizes=frame_sizes,
         video_sizes=[1, 1],
-    )
-    changed_features = [features.clone() for features in llm_layer_features]
-    for features in changed_features:
-        features[frame_sizes[0]:] *= -2.0
+    )[0]
+    changed_features = llm_layer_features[0].clone()
+    changed_features[frame_sizes[0]:] *= -2.0
     changed = module(
+        0,
         pre_global_tokens,
         changed_features,
         frame_sizes=frame_sizes,
         video_sizes=[1, 1],
-    )
+    )[0]
 
     torch.testing.assert_close(baseline[0], changed[0])
     assert not torch.allclose(baseline[1], changed[1])
@@ -380,6 +413,14 @@ def test_pre_and_post_modules_use_public_attention_classes_with_disjoint_paramet
         for name, _ in post_module.named_parameters()
         for component in ("camera_token", "scene_token", "projector")
     )
+    assert len({id(projection.weight) for projection in post_module.post_injection_projections}) == POST_DISTILL_DEPTH
+    assert all(projection.bias is None for projection in post_module.post_injection_projections)
+    assert all(projection.weight.shape == (10, 8) for projection in post_module.post_injection_projections)
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.post_injection_projections)
+    with torch.no_grad():
+        post_module.post_injection_projections[0].weight.fill_(1)
+    post_module.reset_parameters()
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.post_injection_projections)
     assert all(
         key.startswith(
             (
@@ -394,7 +435,7 @@ def test_pre_and_post_modules_use_public_attention_classes_with_disjoint_paramet
     )
 
 
-def test_post_module_rejects_missing_layers_and_invalid_shapes():
+def test_post_module_rejects_invalid_stage_and_shapes():
     module = SceneDistillPostModule(
         llm_hidden_dim=6,
         special_dim=8,
@@ -402,27 +443,27 @@ def test_post_module_rejects_missing_layers_and_invalid_shapes():
     )
     pre_global_tokens = torch.randn(2, NUM_SPECIAL_TOKENS, 8)
     frame_sizes = [18, 19]
-    valid_features = [
-        torch.randn(sum(frame_sizes), 6)
-        for _ in LLM_BLOCK_INDICES
-    ]
+    valid_features = torch.randn(sum(frame_sizes), 6)
 
-    with pytest.raises(ValueError, match="requires 6 LLM layers"):
+    with pytest.raises(ValueError, match="stage_index"):
         module(
+            POST_DISTILL_DEPTH,
             pre_global_tokens,
-            valid_features[:-1],
+            valid_features,
             frame_sizes=frame_sizes,
             video_sizes=[2],
         )
     with pytest.raises(ValueError, match="features must have shape"):
         module(
+            0,
             pre_global_tokens,
-            [*valid_features[:-1], torch.randn(sum(frame_sizes), 7)],
+            torch.randn(sum(frame_sizes), 7),
             frame_sizes=frame_sizes,
             video_sizes=[2],
         )
-    with pytest.raises(ValueError, match="pre_global_tokens must have shape"):
+    with pytest.raises(ValueError, match="post_tokens must have shape"):
         module(
+            0,
             pre_global_tokens[:, :-1],
             valid_features,
             frame_sizes=frame_sizes,
@@ -474,11 +515,33 @@ def test_scene_distill_post_module_state_dict_round_trip():
         special_dim=8,
         num_heads=2,
     )
+    with torch.no_grad():
+        for index, projection in enumerate(source.post_injection_projections, start=1):
+            projection.weight.fill_(index)
 
     target.load_state_dict(source.state_dict(), strict=True)
 
     for source_parameter, target_parameter in zip(source.parameters(), target.parameters()):
         torch.testing.assert_close(source_parameter, target_parameter)
+    assert all(torch.count_nonzero(projection.weight) > 0 for projection in target.post_injection_projections)
+
+
+def test_stage2_checkpoint_keeps_missing_injection_projections_zero():
+    source = SceneDistillPostModule(llm_hidden_dim=6, special_dim=8, num_heads=2)
+    stage2_state_dict = {
+        key: value
+        for key, value in source.state_dict().items()
+        if not key.startswith("post_injection_projections")
+    }
+    target = SceneDistillPostModule(llm_hidden_dim=6, special_dim=8, num_heads=2)
+    incompatible = target.load_state_dict(stage2_state_dict, strict=False)
+
+    assert incompatible.unexpected_keys == []
+    assert incompatible.missing_keys == [
+        f"post_injection_projections.{index}.weight"
+        for index in range(POST_DISTILL_DEPTH)
+    ]
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in target.post_injection_projections)
 
 
 def _import_qwen35_module_or_skip(module_name):
@@ -488,7 +551,7 @@ def _import_qwen35_module_or_skip(module_name):
         pytest.skip(f"Qwen3.5 Transformers runtime is unavailable: {error}")
 
 
-def test_selective_llm_capture_is_masked_layer_input_and_pre_norm(monkeypatch):
+def test_online_post_injection_uses_block_outputs_and_only_updates_special_tokens(monkeypatch):
     modeling_qwen3_5 = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5"
     )
@@ -504,7 +567,10 @@ def test_selective_llm_capture_is_masked_layer_input_and_pre_norm(monkeypatch):
             self.value = value
 
         def forward(self, hidden_states, **kwargs):
-            return hidden_states + self.value
+            hidden_states = hidden_states + self.value
+            if kwargs["past_key_values"] is not None:
+                kwargs["past_key_values"].append(hidden_states.clone())
+            return hidden_states
 
     class DummyRotaryEmbedding(nn.Module):
         def forward(self, hidden_states, position_ids):
@@ -513,6 +579,25 @@ def test_selective_llm_capture_is_masked_layer_input_and_pre_norm(monkeypatch):
     class ScaleNorm(nn.Module):
         def forward(self, hidden_states):
             return hidden_states * 10
+
+    class FakePostModule(nn.Module):
+        layer_indices = LLM_BLOCK_INDICES
+
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+            self.injection_value = 0.0
+
+        def forward(self, stage_index, post_tokens, llm_layer_features, frame_sizes, video_sizes):
+            self.calls.append((LLM_BLOCK_INDICES[stage_index], llm_layer_features.clone()))
+            next_tokens = post_tokens + 1
+            injection_delta = torch.full(
+                (1, NUM_SPECIAL_TOKENS, 8),
+                self.injection_value,
+                device=llm_layer_features.device,
+                dtype=llm_layer_features.dtype,
+            )
+            return next_tokens - 0.5, next_tokens, injection_delta
 
     text_model = object.__new__(modeling_qwen3_5.Qwen3_5TextModelWithGeometry)
     nn.Module.__init__(text_model)
@@ -526,41 +611,94 @@ def test_selective_llm_capture_is_masked_layer_input_and_pre_norm(monkeypatch):
     text_model._update_linear_attn_mask = lambda attention_mask, cache_position: None
     monkeypatch.setattr(modeling_qwen3_5, "create_causal_mask", lambda **kwargs: None)
 
-    inputs_embeds = torch.zeros(1, 4, 8, requires_grad=True)
-    capture_mask = torch.tensor([[True, True, False, True]])
+    inputs_embeds = torch.zeros(1, 20, 8, requires_grad=True)
+    image_mask = torch.zeros(1, 20, dtype=torch.bool)
+    image_mask[:, :18] = True
+    special_mask = torch.zeros(1, 20, dtype=torch.bool)
+    special_mask[:, :NUM_SPECIAL_TOKENS] = True
+    post_module = FakePostModule()
+    baseline_cache = []
+    baseline = text_model(
+        inputs_embeds=inputs_embeds,
+        use_cache=True,
+        past_key_values=baseline_cache,
+        cache_position=torch.arange(20),
+    )
+    zero_gate_cache = []
+    zero_gate_outputs = text_model(
+        inputs_embeds=inputs_embeds,
+        use_cache=True,
+        past_key_values=zero_gate_cache,
+        cache_position=torch.arange(20),
+        scene_distill_post_module=post_module,
+        scene_distill_post_tokens=torch.zeros(1, NUM_SPECIAL_TOKENS, 8),
+        scene_distill_image_mask=image_mask,
+        scene_distill_special_mask=special_mask,
+        scene_distill_frame_sizes=[18],
+        scene_distill_video_sizes=[1],
+        return_scene_distill_post_features=True,
+    )
+    torch.testing.assert_close(zero_gate_outputs.last_hidden_state, baseline.last_hidden_state)
+    assert len(zero_gate_cache) == len(baseline_cache) == 25
+    for zero_gate_state, baseline_state in zip(zero_gate_cache, baseline_cache):
+        torch.testing.assert_close(zero_gate_state, baseline_state)
+    assert len(post_module.calls) == POST_DISTILL_DEPTH
+
+    post_module.calls.clear()
+    post_module.injection_value = 1.0
     outputs = text_model(
         inputs_embeds=inputs_embeds,
         use_cache=False,
-        cache_position=torch.arange(4),
-        capture_hidden_state_layers=LLM_BLOCK_INDICES,
-        capture_hidden_state_mask=capture_mask,
+        cache_position=torch.arange(20),
+        scene_distill_post_module=post_module,
+        scene_distill_post_tokens=torch.zeros(1, NUM_SPECIAL_TOKENS, 8),
+        scene_distill_image_mask=image_mask,
+        scene_distill_special_mask=special_mask,
+        scene_distill_frame_sizes=[18],
+        scene_distill_video_sizes=[1],
+        return_scene_distill_post_features=True,
     )
 
-    assert len(outputs.hidden_states) == POST_DISTILL_DEPTH
-    assert all(features.shape == (3, 8) for features in outputs.hidden_states)
-    expected_layer_values = [10, 36, 78, 136, 210, 300]
-    for features, expected_value in zip(outputs.hidden_states, expected_layer_values):
-        torch.testing.assert_close(features, torch.full_like(features, expected_value))
+    assert [layer_index for layer_index, _ in post_module.calls] == list(LLM_BLOCK_INDICES)
+    expected_special_outputs = [15, 46, 93, 156, 235, 330]
+    expected_other_outputs = [15, 45, 91, 153, 231, 325]
+    for (_, features), special_value, other_value in zip(
+        post_module.calls,
+        expected_special_outputs,
+        expected_other_outputs,
+    ):
+        torch.testing.assert_close(
+            features[:NUM_SPECIAL_TOKENS],
+            torch.full_like(features[:NUM_SPECIAL_TOKENS], special_value),
+        )
+        torch.testing.assert_close(
+            features[NUM_SPECIAL_TOKENS:],
+            torch.full_like(features[NUM_SPECIAL_TOKENS:], other_value),
+        )
     torch.testing.assert_close(
-        outputs.last_hidden_state,
-        torch.full_like(outputs.last_hidden_state, 3250),
+        outputs.last_hidden_state[0, :NUM_SPECIAL_TOKENS],
+        torch.full((NUM_SPECIAL_TOKENS, 8), 3310.0),
     )
+    torch.testing.assert_close(
+        outputs.last_hidden_state[0, NUM_SPECIAL_TOKENS:],
+        torch.full((20 - NUM_SPECIAL_TOKENS, 8), 3250.0),
+    )
+    torch.testing.assert_close(outputs.hidden_states[0], torch.full((1, NUM_SPECIAL_TOKENS, 8), 5.5))
+    torch.testing.assert_close(outputs.hidden_states[1], torch.full((1, NUM_SPECIAL_TOKENS, 8), 6.0))
 
-    sum(features.sum() for features in outputs.hidden_states).backward()
-    assert inputs_embeds.grad[0, 2].abs().sum() == 0
-    assert inputs_embeds.grad[0, [0, 1, 3]].abs().sum() > 0
+    outputs.last_hidden_state.sum().backward()
+    assert inputs_embeds.grad is not None
 
-    with pytest.raises(ValueError, match="ascending order"):
+    with pytest.raises(ValueError, match="provided together"):
         text_model(
-            inputs_embeds=torch.zeros(1, 4, 8),
+            inputs_embeds=torch.zeros(1, 20, 8),
             use_cache=False,
-            cache_position=torch.arange(4),
-            capture_hidden_state_layers=(8, 4),
-            capture_hidden_state_mask=capture_mask,
+            cache_position=torch.arange(20),
+            scene_distill_post_module=post_module,
         )
 
 
-def test_selective_llm_capture_survives_gradient_checkpointing():
+def test_online_post_injection_survives_gradient_checkpointing():
     modeling_qwen3_5 = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5"
     )
@@ -581,22 +719,38 @@ def test_selective_llm_capture_survives_gradient_checkpointing():
     )
     model = modeling_qwen3_5.Qwen3_5TextModelWithGeometry(config).train()
     model.gradient_checkpointing_enable()
-    input_ids = torch.randint(0, config.vocab_size, (1, 12))
-    capture_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-    capture_mask[:, 2:10] = True
+    input_ids = torch.randint(0, config.vocab_size, (1, 20))
+    image_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    image_mask[:, :18] = True
+    special_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    special_mask[:, :NUM_SPECIAL_TOKENS] = True
+    post_module = SceneDistillPostModule(
+        llm_hidden_dim=config.hidden_size,
+        special_dim=8,
+        num_heads=2,
+    )
+    with torch.no_grad():
+        post_module.post_injection_projections[0].weight.fill_(0.1)
 
     outputs = model(
         input_ids=input_ids,
         attention_mask=torch.ones_like(input_ids),
         use_cache=False,
-        capture_hidden_state_layers=LLM_BLOCK_INDICES,
-        capture_hidden_state_mask=capture_mask,
+        scene_distill_post_module=post_module,
+        scene_distill_post_tokens=torch.randn(1, NUM_SPECIAL_TOKENS, 8),
+        scene_distill_image_mask=image_mask,
+        scene_distill_special_mask=special_mask,
+        scene_distill_frame_sizes=[18],
+        scene_distill_video_sizes=[1],
+        return_scene_distill_post_features=True,
     )
-    loss = sum(features.square().mean() for features in outputs.hidden_states)
+    loss = outputs.last_hidden_state.square().mean() + sum(
+        features.square().mean() for features in outputs.hidden_states
+    )
     loss.backward()
 
     assert model.is_gradient_checkpointing
-    assert all(features.shape == (8, config.hidden_size) for features in outputs.hidden_states)
+    assert all(features.shape == (1, NUM_SPECIAL_TOKENS, 8) for features in outputs.hidden_states)
     assert model.layers[4].self_attn.q_proj.weight.grad is not None
     assert model.layers[24].self_attn.q_proj.weight.grad is not None
 
@@ -804,7 +958,7 @@ def test_outer_wrapper_applies_independent_losses_and_clears_transients():
     assert wrapper.model.calls[-1] == (False, False)
 
 
-def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
+def test_inner_wrapper_always_runs_post_and_reuses_teacher():
     scene_wrapper = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5_scene_distill"
     )
@@ -824,34 +978,26 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
     class FakePostModule(nn.Module):
         def __init__(self):
             super().__init__()
-            self.calls = 0
-
-        def forward(self, pre_global_tokens, llm_layer_features, frame_sizes, video_sizes):
-            self.calls += 1
-            return teacher_features.clone()
+            self.layer_indices = LLM_BLOCK_INDICES
 
     class FakeLanguageModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.capture_requests = []
+            self.post_requests = []
 
         def forward(
             self,
             inputs_embeds,
-            capture_hidden_state_layers=None,
-            capture_hidden_state_mask=None,
+            scene_distill_post_module=None,
+            return_scene_distill_post_features=False,
             **kwargs,
         ):
-            self.capture_requests.append(capture_hidden_state_layers)
-            captured = None
-            if capture_hidden_state_layers is not None:
-                captured = tuple(
-                    torch.zeros(int(capture_hidden_state_mask.sum().item()), hidden_dim)
-                    for _ in capture_hidden_state_layers
-                )
+            self.post_requests.append(scene_distill_post_module)
             return output_type(
                 last_hidden_state=inputs_embeds,
-                hidden_states=captured,
+                hidden_states=(teacher_features[..., :1024], teacher_features[..., 1024:])
+                if return_scene_distill_post_features
+                else None,
             )
 
     model = object.__new__(model_class)
@@ -903,8 +1049,7 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.scene_distill_post_module.calls == 1
-    assert model.language_model.capture_requests[-1] == LLM_BLOCK_INDICES
+    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
     assert model._last_pre_distill_loss is not None
     assert model._last_post_distill_loss is not None
     assert outputs.hidden_states is None
@@ -916,7 +1061,7 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.scene_distill_post_module.calls == 2
+    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
 
     teacher_calls["count"] = 0
     model(
@@ -925,8 +1070,7 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 1
-    assert model.scene_distill_post_module.calls == 2
-    assert model.language_model.capture_requests[-1] is None
+    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
 
     teacher_calls["count"] = 0
     model.geometry_encoder = None
@@ -936,4 +1080,13 @@ def test_inner_wrapper_reuses_teacher_and_only_runs_post_when_enabled():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 0
-    assert model.scene_distill_post_module.calls == 2
+    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
+
+    calls_before_decode = len(model.language_model.post_requests)
+    model(
+        input_ids=torch.tensor([[1]]),
+        attention_mask=torch.ones(1, 1, dtype=torch.long),
+        position_ids=torch.zeros(4, 1, 1, dtype=torch.long),
+        cache_position=torch.tensor([1]),
+    )
+    assert len(model.language_model.post_requests) == calls_before_decode

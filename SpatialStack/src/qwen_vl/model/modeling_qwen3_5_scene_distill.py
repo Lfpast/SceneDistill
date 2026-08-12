@@ -388,22 +388,22 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             past_key_values=past_key_values,
             inputs_embeds=expanded_inputs_embeds,
             cache_position=cache_position,
-            capture_hidden_state_layers=LLM_BLOCK_INDICES if compute_post_distill_loss else None,
-            capture_hidden_state_mask=image_mask_2d if compute_post_distill_loss else None,
+            scene_distill_post_module=self.scene_distill_post_module,
+            scene_distill_post_tokens=pre_global_tokens,
+            scene_distill_image_mask=image_mask_2d,
+            scene_distill_special_mask=self._direct_only_mask,
+            scene_distill_frame_sizes=llm_frame_sizes,
+            scene_distill_video_sizes=video_sizes,
+            return_scene_distill_post_features=compute_post_distill_loss,
             **kwargs,
         )
         if compute_post_distill_loss:
-            llm_layer_features = outputs.hidden_states
-            if llm_layer_features is None:
+            final_post_features = outputs.hidden_states
+            if final_post_features is None:
                 raise RuntimeError(
-                    f"SceneDistill Post did not receive captured LLM layers {LLM_BLOCK_INDICES}."
+                    f"SceneDistill Post did not complete layers {LLM_BLOCK_INDICES}."
                 )
-            post_features = self.scene_distill_post_module(
-                pre_global_tokens,
-                llm_layer_features,
-                frame_sizes=llm_frame_sizes,
-                video_sizes=video_sizes,
-            )
+            post_features = torch.cat(final_post_features, dim=-1)
             self._last_post_distill_loss = scene_distillation_loss(post_features, teacher_features)
 
         return Qwen3_5ModelOutputWithPast(
@@ -431,6 +431,15 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         ):
             if module is not None:
                 module.reset_parameters()
+
+    def _init_weights(self, module):
+        super()._init_weights(module)
+        post_module = getattr(getattr(self, "model", None), "scene_distill_post_module", None)
+        if post_module is not None and any(
+            module is projection
+            for projection in post_module.post_injection_projections
+        ):
+            nn.init.zeros_(module.weight)
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):

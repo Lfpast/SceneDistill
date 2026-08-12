@@ -285,8 +285,13 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         image_mask: Optional[torch.Tensor] = None,
         grid_thw: Optional[torch.Tensor] = None,
         include_camera_token: bool = False,
-        capture_hidden_state_layers: Optional[Sequence[int]] = None,
-        capture_hidden_state_mask: Optional[torch.Tensor] = None,
+        scene_distill_post_module: Optional[nn.Module] = None,
+        scene_distill_post_tokens: Optional[torch.Tensor] = None,
+        scene_distill_image_mask: Optional[torch.Tensor] = None,
+        scene_distill_special_mask: Optional[torch.Tensor] = None,
+        scene_distill_frame_sizes: Optional[Sequence[int]] = None,
+        scene_distill_video_sizes: Optional[Sequence[int]] = None,
+        return_scene_distill_post_features: bool = False,
         **kwargs,
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -328,38 +333,59 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        capture_layers = (
-            None
-            if capture_hidden_state_layers is None
-            else tuple(int(layer) for layer in capture_hidden_state_layers)
+        scene_distill_arguments = (
+            scene_distill_post_module,
+            scene_distill_post_tokens,
+            scene_distill_image_mask,
+            scene_distill_special_mask,
+            scene_distill_frame_sizes,
+            scene_distill_video_sizes,
         )
-        if (capture_layers is None) != (capture_hidden_state_mask is None):
+        scene_distill_active = all(argument is not None for argument in scene_distill_arguments)
+        if any(argument is not None for argument in scene_distill_arguments) and not scene_distill_active:
             raise ValueError(
-                "capture_hidden_state_layers and capture_hidden_state_mask must be provided together."
+                "SceneDistill Post module, tokens, masks, frame sizes, and video sizes must be provided together."
             )
-        if capture_layers is not None:
-            if not capture_layers:
-                raise ValueError("capture_hidden_state_layers cannot be empty.")
-            if capture_layers != tuple(sorted(set(capture_layers))):
+        if return_scene_distill_post_features and not scene_distill_active:
+            raise ValueError("return_scene_distill_post_features requires an active SceneDistill Post path.")
+
+        scene_distill_stage_by_layer = {}
+        scene_distill_final_features = None
+        if scene_distill_active:
+            scene_distill_layers = tuple(int(layer) for layer in scene_distill_post_module.layer_indices)
+            if scene_distill_layers != tuple(sorted(set(scene_distill_layers))):
                 raise ValueError(
-                    "capture_hidden_state_layers must contain unique layer indices in ascending order."
+                    "SceneDistill Post layer indices must be unique and in ascending order."
                 )
-            if capture_layers[0] < 0 or capture_layers[-1] >= self.config.num_hidden_layers:
+            if (
+                not scene_distill_layers
+                or scene_distill_layers[0] < 0
+                or scene_distill_layers[-1] >= self.config.num_hidden_layers
+            ):
                 raise ValueError(
-                    f"capture_hidden_state_layers={capture_layers} is outside "
+                    f"SceneDistill Post layers {scene_distill_layers} are outside "
                     f"num_hidden_layers={self.config.num_hidden_layers}."
                 )
             if (
-                capture_hidden_state_mask.dtype != torch.bool
-                or capture_hidden_state_mask.shape != hidden_states.shape[:2]
+                scene_distill_image_mask.dtype != torch.bool
+                or scene_distill_image_mask.shape != hidden_states.shape[:2]
+                or scene_distill_special_mask.dtype != torch.bool
+                or scene_distill_special_mask.shape != hidden_states.shape[:2]
             ):
                 raise ValueError(
-                    "capture_hidden_state_mask must be a bool tensor with shape "
-                    f"{hidden_states.shape[:2]}, got dtype={capture_hidden_state_mask.dtype} "
-                    f"and shape={capture_hidden_state_mask.shape}."
+                    "SceneDistill image and special masks must be bool tensors with shape "
+                    f"{hidden_states.shape[:2]}."
                 )
-        capture_layer_set = set(capture_layers or ())
-        captured_hidden_states = []
+            if int(scene_distill_image_mask.sum().item()) != sum(scene_distill_frame_sizes):
+                raise ValueError("SceneDistill image mask does not match frame sizes.")
+            if torch.any(scene_distill_special_mask & ~scene_distill_image_mask):
+                raise ValueError("SceneDistill special mask must be a subset of the image mask.")
+            if int(scene_distill_special_mask.sum().item()) != scene_distill_post_tokens[..., 0].numel():
+                raise ValueError("SceneDistill special mask does not match Post tokens.")
+            scene_distill_stage_by_layer = {
+                layer_index: stage_index
+                for stage_index, layer_index in enumerate(scene_distill_layers)
+            }
 
         vis_pos_embed_per_image: Optional[torch.Tensor] = None
         geo_pos_embed_per_image: Optional[torch.Tensor] = None
@@ -402,9 +428,6 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         for layer_idx, decoder_layer in enumerate(self.layers[: self.config.num_hidden_layers]):
             layer_mask = linear_attn_mask if decoder_layer.layer_type == "linear_attention" else causal_mask
 
-            if layer_idx in capture_layer_set:
-                captured_hidden_states.append(hidden_states[capture_hidden_state_mask])
-
             hidden_states = decoder_layer(
                 hidden_states,
                 position_embeddings=position_embeddings,
@@ -434,16 +457,29 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
                 hidden_states = hidden_states.clone()
                 hidden_states[vision_token_mask] = fused
 
-        if capture_layers is not None and len(captured_hidden_states) != len(capture_layers):
-            raise RuntimeError(
-                f"Captured {len(captured_hidden_states)} hidden states for requested layers {capture_layers}."
-            )
+            if layer_idx in scene_distill_stage_by_layer:
+                stage_index = scene_distill_stage_by_layer[layer_idx]
+                post_after_frame, scene_distill_post_tokens, injection_delta = scene_distill_post_module(
+                    stage_index,
+                    scene_distill_post_tokens,
+                    hidden_states[scene_distill_image_mask],
+                    frame_sizes=scene_distill_frame_sizes,
+                    video_sizes=scene_distill_video_sizes,
+                )
+                hidden_states = hidden_states.clone()
+                hidden_states[scene_distill_special_mask] = (
+                    hidden_states[scene_distill_special_mask]
+                    + injection_delta.flatten(0, 1).to(hidden_states.dtype)
+                )
+                if stage_index == len(scene_distill_layers) - 1:
+                    scene_distill_final_features = (post_after_frame, scene_distill_post_tokens)
+
         hidden_states = self.norm(hidden_states)
 
         return Qwen3_5ModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values,
-            hidden_states=tuple(captured_hidden_states) if capture_layers is not None else None,
+            hidden_states=scene_distill_final_features if return_scene_distill_post_features else None,
         )
 
 
