@@ -187,11 +187,12 @@ def _estimated_video_groups(sample: dict, max_frames: int, temporal_patch_size: 
     if "video" in sample:
         num_videos = len(sample["video"]) if isinstance(sample["video"], list) else 1
         return num_videos * ((max_frames + temporal_patch_size - 1) // temporal_patch_size)
-    visual = sample.get("images", sample.get("image"))
-    if visual is None:
+    if "images" in sample:
+        num_frames = len(sample["images"])
+    elif "image" in sample:
+        num_frames = 1
+    else:
         return 0
-    num_frames = len(visual) if isinstance(visual, list) else 1
-    num_frames = min(num_frames, max_frames)
     return (num_frames + temporal_patch_size - 1) // temporal_patch_size
 
 
@@ -280,13 +281,26 @@ class LazySupervisedDataset(Dataset):
         if spar_info is None:
             return
         info = json.loads(spar_info)
+        referenced_frames = [
+            int(index)
+            for key, values in info.items()
+            if key.endswith("_img_idx") and values is not None
+            for index in np.asarray(values).reshape(-1)
+        ]
+        invalid_frames = [index for index in referenced_frames if not 0 <= index < len(frames)]
+        if invalid_frames:
+            raise ValueError(
+                "SceneDistill spar_info references frames outside its annotated sequence: "
+                f"type={info.get('type')}, frame_count={len(frames)}, "
+                f"invalid_indices={invalid_frames}."
+            )
         from .draw_marker import DRAW_FUNCTIONS
 
         draw_fn = DRAW_FUNCTIONS[info["type"]]
         draw_fn(frames[0] if len(frames) == 1 else frames, info)
 
     def process_video(self, visual, data_path, spar_info=None):
-        """Load and sample one logical video without duplicating real frames."""
+        """Load one logical video while preserving annotated frame sequences."""
         backend = "image_sequence"
         raw_fps = 1.0
 
@@ -341,7 +355,11 @@ class LazySupervisedDataset(Dataset):
 
         if frame_sources is not None:
             total_frames = len(frame_sources)
-            target_frames = min(total_frames, int(self.data_args.video_max_frames))
+            target_frames = (
+                total_frames
+                if isinstance(visual, (list, tuple))
+                else min(total_frames, int(self.data_args.video_max_frames))
+            )
             indices = np.unique(
                 np.linspace(0, total_frames - 1, target_frames).round().astype(np.int64)
             )
