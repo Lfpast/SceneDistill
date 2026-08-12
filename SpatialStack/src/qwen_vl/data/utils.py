@@ -1,271 +1,99 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
+"""Shared frame preparation for the SceneDistill native-video dataflow."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import numpy as np
 import torch
 from PIL import Image
-from torchvision import transforms as TF
-import numpy as np
-import copy
+from qwen_vl_utils.vision_process import smart_resize
 
 
-GEOMETRY_ENCODER_PATCH_SIZES = {
-    "vggt": 14,
-    "vggt_omega": 16,
-    "vggt_omega_direct": 16,
-    "scene_distill": 16,
-}
+def _load_rgb_image(image):
+    if isinstance(image, str):
+        image = Image.open(image)
+    elif not isinstance(image, Image.Image):
+        raise TypeError(f"Unsupported video frame type: {type(image)}")
+
+    if image.mode == "RGBA":
+        background = Image.new("RGBA", image.size, (255, 255, 255, 255))
+        image = Image.alpha_composite(background, image)
+    return image.convert("RGB")
 
 
-def get_geometry_encoder_patch_size(geometry_encoder_type: str = "vggt") -> int:
-    return GEOMETRY_ENCODER_PATCH_SIZES.get(geometry_encoder_type, 14)
+def load_and_preprocess_video_frames(
+    frames: Sequence,
+    video_processor,
+    min_pixels: int,
+    max_pixels: int,
+) -> torch.Tensor:
+    """Resize one video's real frames once and return uint8 ``[S,3,H,W]`` pixels."""
+    if not frames:
+        raise ValueError("SceneDistill requires at least one real frame per video.")
 
-
-def _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size: int) -> tuple[int, int, int]:
-    t, h, w = [int(v) for v in grid_thw.tolist()]
-    return t, h // spatial_merge_size, w // spatial_merge_size
-
-
-def get_qwen3_5_geometry_input_hw(grid_thw, geometry_encoder_type: str = "vggt") -> tuple[int, int]:
-    geometry_patch_size = get_geometry_encoder_patch_size(geometry_encoder_type)
-    _, grid_h, grid_w = [int(v) for v in grid_thw.tolist()]
-    return grid_h * geometry_patch_size, grid_w * geometry_patch_size
-
-
-def get_qwen3_5_visual_token_count(
-    grid_thw,
-    spatial_merge_size: int,
-    geometry_encoder_type: str = "vggt",
-) -> int:
-    t, merged_h, merged_w = _get_qwen3_5_patch_grid(grid_thw, spatial_merge_size)
-    return t * merged_h * merged_w
-
-
-def expand_visual_placeholders(text: str, visual_token_counts, visual_type: str = "image") -> str:
-    visual_tag = f"<{visual_type}>"
-    parts = text.split(visual_tag)
-    if len(parts) == 1:
-        return text
-    if len(parts) - 1 != len(visual_token_counts):
+    rgb_frames = [_load_rgb_image(frame) for frame in frames]
+    source_size = rgb_frames[0].size
+    if any(frame.size != source_size for frame in rgb_frames[1:]):
         raise ValueError(
-            f"Expected {len(parts) - 1} `{visual_tag}` placeholders but got {len(visual_token_counts)} visual spans."
+            "All frames in one logical video must share the same source resolution; "
+            f"got {[frame.size for frame in rgb_frames]}."
         )
 
-    expanded = []
-    for part, token_count in zip(parts[:-1], visual_token_counts):
-        expanded.append(part)
-        expanded.append("<|vision_start|>" + "<|image_pad|>" * int(token_count) + "<|vision_end|>")
-    expanded.append(parts[-1])
-    return "".join(expanded)
+    patch_factor = int(video_processor.patch_size) * int(video_processor.merge_size)
+    source_width, source_height = source_size
+    target_height, target_width = smart_resize(
+        source_height,
+        source_width,
+        factor=patch_factor,
+        min_pixels=int(min_pixels),
+        max_pixels=int(max_pixels),
+    )
+    resized = [
+        np.asarray(
+            frame.resize((target_width, target_height), Image.Resampling.BICUBIC),
+            dtype=np.uint8,
+        ).copy()
+        for frame in rgb_frames
+    ]
+    video = torch.from_numpy(np.stack(resized)).permute(0, 3, 1, 2).contiguous()
 
-
-def _load_rgb_image(image_path):
-    if isinstance(image_path, str):
-        img = Image.open(image_path)
-    elif isinstance(image_path, Image.Image):
-        img = image_path
-    else:
-        raise NotImplementedError(f"Unsupported image type: {type(image_path)}")
-
-    if img.mode == "RGBA":
-        background = Image.new("RGBA", img.size, (255, 255, 255, 255))
-        img = Image.alpha_composite(background, img)
-    return img.convert("RGB")
-
-
-def load_and_preprocess_images(image_path_list, mode="crop", target_size=518):
-    """
-    A quick start function to load and preprocess images for model input.
-    This assumes the images should have the same shape for easier batching, but our model can also work well with different shapes.
-
-    Args:
-        image_path_list (list): List of paths to image files
-        mode (str, optional): Preprocessing mode, either "crop" or "pad".
-                             - "crop" (default): Sets width to 518px and center crops height if needed.
-                             - "pad": Preserves all pixels by making the largest dimension 518px
-                               and padding the smaller dimension to reach a square shape.
-
-    Returns:
-        torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W)
-
-    Raises:
-        ValueError: If the input list is empty or if mode is invalid
-
-    Notes:
-        - Images with different dimensions will be padded with white (value=1.0)
-        - A warning is printed when images have different shapes
-        - When mode="crop": The function ensures width=518px while maintaining aspect ratio
-          and height is center-cropped if larger than 518px
-        - When mode="pad": The function ensures the largest dimension is 518px while maintaining aspect ratio
-          and the smaller dimension is padded to reach a square shape (518x518)
-        - Dimensions are adjusted to be divisible by 14 for compatibility with model requirements
-    """
-    # Check for empty list
-    if len(image_path_list) == 0:
-        raise ValueError("At least 1 image is required")
-
-    # Validate mode
-    if mode not in ["crop", "pad"]:
-        raise ValueError("Mode must be either 'crop' or 'pad'")
-
-    images = []
-    shapes = set()
-    to_tensor = TF.ToTensor()
-
-    # First process all images and collect their shapes
-    for image_path in image_path_list:
-
-        # Open image
-        img = _load_rgb_image(image_path)
-
-        width, height = img.size
-
-        if mode == "pad":
-            # Make the largest dimension 518px while maintaining aspect ratio
-            if width >= height:
-                new_width = target_size
-                new_height = round(height * (new_width / width) / 14) * 14  # Make divisible by 14
-            else:
-                new_height = target_size
-                new_width = round(width * (new_height / height) / 14) * 14  # Make divisible by 14
-        else:  # mode == "crop"
-            # Original behavior: set width to 518px
-            new_width = target_size
-            # Calculate height maintaining aspect ratio, divisible by 14
-            new_height = round(height * (new_width / width) / 14) * 14
-
-        # Resize with new dimensions (width, height)
-        img = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
-        img = to_tensor(img)  # Convert to tensor (0, 1)
-
-        # Center crop height if it's larger than 518 (only in crop mode)
-        if mode == "crop" and new_height > target_size:
-            start_y = (new_height - target_size) // 2
-            img = img[:, start_y : start_y + target_size, :]
-
-        # For pad mode, pad to make a square of target_size x target_size
-        if mode == "pad":
-            h_padding = target_size - img.shape[1]
-            w_padding = target_size - img.shape[2]
-
-            if h_padding > 0 or w_padding > 0:
-                pad_top = h_padding // 2
-                pad_bottom = h_padding - pad_top
-                pad_left = w_padding // 2
-                pad_right = w_padding - pad_left
-
-                # Pad with white (value=1.0)
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-                )
-
-        shapes.add((img.shape[1], img.shape[2]))
-        images.append(img)
-
-    # Check if we have different shapes
-    # In theory our model can also work well with different shapes
-    if len(shapes) > 1:
-        print(f"Warning: Found images with different shapes: {shapes}")
-        # Find maximum dimensions
-        max_height = max(shape[0] for shape in shapes)
-        max_width = max(shape[1] for shape in shapes)
-
-        # Pad images if necessary
-        padded_images = []
-        for img in images:
-            h_padding = max_height - img.shape[1]
-            w_padding = max_width - img.shape[2]
-
-            if h_padding > 0 or w_padding > 0:
-                pad_top = h_padding // 2
-                pad_bottom = h_padding - pad_top
-                pad_left = w_padding // 2
-                pad_right = w_padding - pad_left
-
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-                )
-            padded_images.append(img)
-        images = padded_images
-
-    images = torch.stack(images)  # concatenate images
-
-    # Ensure correct shape when single image
-    if len(image_path_list) == 1:
-        # Verify shape is (1, C, H, W)
-        if images.dim() == 3:
-            images = images.unsqueeze(0)
-
-    return images
-
-
-def build_qwen3_5_geometry_inputs(images, image_grid_thw, geometry_encoder_type: str = "vggt"):
-    geometry_tensors = []
-    max_height = 0
-    max_width = 0
-
-    for image, grid in zip(images, image_grid_thw):
-        rgb_image = _load_rgb_image(image)
-        # VGGT-family Qwen3.5 paths share the same geometry-input sizing rule:
-        # derive the
-        # geometry-side resolution directly from the pre-merger Qwen patch grid.
-        # This keeps input-size as the controlled variable across branches while
-        # leaving the downstream fusion/injection logic unchanged.
-        target_height, target_width = get_qwen3_5_geometry_input_hw(
-            grid,
-            geometry_encoder_type=geometry_encoder_type,
+    if video.ndim != 4 or video.shape[1] != 3:
+        raise ValueError(f"Video frames must have shape [S,3,H,W], got {tuple(video.shape)}.")
+    if video.shape[-2] % patch_factor or video.shape[-1] % patch_factor:
+        raise ValueError(
+            f"Video height/width must be divisible by {patch_factor}, got {tuple(video.shape[-2:])}."
         )
-        resized = rgb_image.resize((target_width, target_height), Image.Resampling.BICUBIC)
-        tensor = TF.ToTensor()(resized)
-        geometry_tensors.append(tensor)
-        max_height = max(max_height, target_height)
-        max_width = max(max_width, target_width)
-
-    padded_tensors = []
-    for tensor in geometry_tensors:
-        h_padding = max_height - tensor.shape[1]
-        w_padding = max_width - tensor.shape[2]
-        if h_padding > 0 or w_padding > 0:
-            pad_top = h_padding // 2
-            pad_bottom = h_padding - pad_top
-            pad_left = w_padding // 2
-            pad_right = w_padding - pad_left
-            tensor = torch.nn.functional.pad(
-                tensor, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-            )
-        padded_tensors.append(tensor)
-
-    return padded_tensors
+    return video
 
 
-def prepare_image_inputs(image, image_processor, model_type="qwen2.5vl", geometry_encoder_type: str = "vggt"):
-    images = load_and_preprocess_images([image])
-    merge_size: int = getattr(image_processor, "merge_size")
-    patch_size: int = getattr(image_processor, "patch_size")
-    _, height, width = images[0].shape
+def build_geometry_video_inputs(video_frames: torch.Tensor) -> torch.Tensor:
+    """Create the VGGT input from the exact uint8 frames consumed by Qwen."""
+    if video_frames.ndim != 4 or video_frames.shape[1] != 3 or video_frames.shape[0] == 0:
+        raise ValueError(
+            "geometry video input must originate from non-empty [S,3,H,W] RGB frames, "
+            f"got {tuple(video_frames.shape)}."
+        )
+    geometry_inputs = video_frames.to(dtype=torch.float32).div_(255.0)
+    if not torch.isfinite(geometry_inputs).all():
+        raise FloatingPointError("SceneDistill geometry video input contains non-finite values.")
+    return geometry_inputs
 
-    if width % (patch_size * merge_size) > 0:
-        width = width - (width % (patch_size * merge_size))
-    if height % (patch_size * merge_size) > 0:
-        height = height - (height % (patch_size * merge_size))
 
-    images = images[:,:, :height, :width]
-    visual_processed = image_processor(images, return_tensors="pt", do_rescale=False)
-    image_tensor = visual_processed["pixel_values"]
-    grid_thw = visual_processed["image_grid_thw"]
-
-    if model_type == "qwen3.5":
-        geometry_encoder_inputs = build_qwen3_5_geometry_inputs(
-            [image], grid_thw, geometry_encoder_type=geometry_encoder_type
-        )[0]
-    else:
-        geometry_encoder_inputs = copy.deepcopy(images[0])
-
-    ret = {
-        "pixel_values": image_tensor,
-        "image_grid_thw": grid_thw[0],
-        "geometry_encoder_inputs": geometry_encoder_inputs,
+def prepare_video_inputs(
+    frames: Sequence,
+    video_processor,
+    min_pixels: int,
+    max_pixels: int,
+) -> dict[str, torch.Tensor]:
+    """Prepare the one shared resized frame sequence used by Qwen and VGGT."""
+    video_frames = load_and_preprocess_video_frames(
+        frames,
+        video_processor,
+        min_pixels=min_pixels,
+        max_pixels=max_pixels,
+    )
+    return {
+        "video_frames": video_frames,
+        "geometry_encoder_inputs": build_geometry_video_inputs(video_frames),
     }
-    return ret

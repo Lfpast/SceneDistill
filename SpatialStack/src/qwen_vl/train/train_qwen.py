@@ -32,7 +32,6 @@ sys.path.append(str(project_root))
 
 import qwen_vl.train.trainer
 import qwen_vl.train.sampler
-from qwen_vl.train.trainer import replace_qwen2_vl_attention_class
 
 from transformers import (
     Qwen2VLForConditionalGeneration,
@@ -251,11 +250,6 @@ def train(attn_implementation="flash_attention_2"):
         data_args.model_type = "qwen2vl"
         data_args.processor = None
     elif model_type in QWEN3_5_MODEL_TYPES or "qwen3.5" in model_args.model_name_or_path.lower():
-        if data_args.data_flatten:
-            raise NotImplementedError(
-                "Qwen3.5 training does not support data_flatten in this branch."
-            )
-
         from transformers import Qwen3_5ForConditionalGeneration
 
         if model_args.use_geometry_encoder:
@@ -321,7 +315,6 @@ def train(attn_implementation="flash_attention_2"):
             cache_dir=training_args.cache_dir,
             padding_side="right",
         )
-        data_args.image_processor = processor.image_processor
         data_args.processor = processor
         data_args.model_type = "qwen3.5"
     else:
@@ -329,8 +322,6 @@ def train(attn_implementation="flash_attention_2"):
             f"Unsupported model_type '{model_type}' for training path: {model_args.model_name_or_path}"
         )
 
-    if data_args.data_flatten:
-        replace_qwen2_vl_attention_class()
     model.config.use_cache = False
 
     if training_args.gradient_checkpointing:

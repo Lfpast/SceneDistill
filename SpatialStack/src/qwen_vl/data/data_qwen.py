@@ -1,42 +1,27 @@
-import os
 import copy
 import json
+import os
 import random
-import logging
-import re
-import time
-import math
-import itertools
-import ast
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Sequence, List, Tuple
-from io import BytesIO
-import base64
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Dict, List
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
-from PIL import Image
-from decord import VideoReader
 import transformers
+from decord import VideoReader
+from PIL import Image
+from torch.utils.data import Dataset
+from transformers.video_utils import VideoMetadata
 
 from . import data_list
-from .rope2d import get_rope_index_25, get_rope_index_2, get_rope_index_35
-from .utils import get_qwen3_5_visual_token_count, prepare_image_inputs
+from .utils import prepare_video_inputs
+
 
 IGNORE_INDEX = -100
-IMAGE_TOKEN_INDEX = 151655
-VIDEO_TOKEN_INDEX = 151656
 DEFAULT_IMAGE_TOKEN = "<image>"
 DEFAULT_VIDEO_TOKEN = "<video>"
-
-QWEN_TRAIN_CHAT_TEMPLATE = (
-    "{% for message in messages %}"
-    "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
-    "{% endfor %}"
-    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-)
+QWEN_VIDEO_PLACEHOLDER = "<|vision_start|><|video_pad|><|vision_end|>"
 
 QWEN3_5_NON_THINKING_CHAT_TEMPLATE = (
     "{% for message in messages %}"
@@ -50,789 +35,500 @@ QWEN3_5_NON_THINKING_CHAT_TEMPLATE = (
 local_rank = None
 
 
-def _estimated_qwen3_5_visual_tokens_per_image(geometry_encoder_type: str = "vggt") -> int:
-    base_tokens = 252
-    if geometry_encoder_type in {"vggt_omega_direct", "scene_distill"}:
-        return base_tokens + 17
-    return base_tokens
-
-
 def rank0_print(*args):
     if local_rank == 0:
         print(*args)
 
 
-def read_jsonl(path, max_samples: int=-1):
-    with open(path, "r") as f:
-        # return [json.loads(line) for line in f]
-        ret = []
-        for line in f:
-            ret.append(json.loads(line))
-            if max_samples !=-1 and len(ret) >= max_samples:
+def read_jsonl(path, max_samples: int = -1):
+    records = []
+    with open(path, "r") as file:
+        for line in file:
+            records.append(json.loads(line))
+            if max_samples != -1 and len(records) >= max_samples:
                 break
-    return ret
+    return records
 
 
-def _extract_input_ids(encoded):
-    if hasattr(encoded, "keys") and "input_ids" in encoded:
-        return list(encoded["input_ids"])
-    return list(encoded)
-
-
-def _build_training_tokenizer(
-    tokenizer: transformers.PreTrainedTokenizer,
-    model_type: str,
-) -> transformers.PreTrainedTokenizer:
+def _build_training_tokenizer(tokenizer: transformers.PreTrainedTokenizer):
     tokenizer = copy.deepcopy(tokenizer)
-    if model_type == "qwen3.5":
-        tokenizer.chat_template = QWEN3_5_NON_THINKING_CHAT_TEMPLATE
-    else:
-        tokenizer.chat_template = QWEN_TRAIN_CHAT_TEMPLATE
+    tokenizer.chat_template = QWEN3_5_NON_THINKING_CHAT_TEMPLATE
     return tokenizer
 
 
-def _apply_training_chat_template(
-    tokenizer: transformers.PreTrainedTokenizer,
-    messages,
-    *,
-    add_generation_prompt: bool = False,
-):
-    encoded = tokenizer.apply_chat_template(
+def _apply_training_chat_template(tokenizer, messages, *, tokenize=True):
+    return tokenizer.apply_chat_template(
         messages,
-        tokenize=True,
-        add_generation_prompt=add_generation_prompt,
+        tokenize=tokenize,
+        add_generation_prompt=False,
     )
-    return _extract_input_ids(encoded)
 
 
 def _get_assistant_prefix_length(tokenizer: transformers.PreTrainedTokenizer) -> int:
-    if hasattr(tokenizer, "_assistant_prefix_length"):
-        return tokenizer._assistant_prefix_length
-
     empty_assistant_ids = _apply_training_chat_template(
         tokenizer,
         [{"role": "assistant", "content": ""}],
     )
     closing_ids = tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
-    assistant_prefix_length = max(0, len(empty_assistant_ids) - len(closing_ids))
-    tokenizer._assistant_prefix_length = assistant_prefix_length
-    return assistant_prefix_length
+    return max(0, len(empty_assistant_ids) - len(closing_ids))
 
 
-def preprocess_qwen_2_visual(
-    sources,
+def preprocess_video(
+    source,
     tokenizer: transformers.PreTrainedTokenizer,
-    grid_thw: List = [],
-    visual_type: str = "image",
-    model_type: str = "qwen2.5vl",
-) -> Dict:
+    processor,
+    videos: List[torch.Tensor],
+    video_metadata: List[VideoMetadata],
+) -> Dict[str, torch.Tensor]:
+    """Tokenize one conversation through the native Qwen3.5 video processor."""
     roles = {"human": "user", "gpt": "assistant"}
-    system_message = "You are a helpful assistant."
-    if visual_type not in ["image", "video"]:
-        raise ValueError("visual_type must be either 'image' or 'video'")
-
-    tokenizer = _build_training_tokenizer(tokenizer, model_type)
+    tokenizer = _build_training_tokenizer(tokenizer)
     assistant_prefix_length = _get_assistant_prefix_length(tokenizer)
+    if source:
+        first_role = source[0].get("from", source[0].get("role"))
+    else:
+        first_role = None
+    if source and roles.get(first_role, first_role) != "user":
+        source = source[1:]
 
-    visual_replicate_index = 0
-    input_ids, targets = [], []
+    input_ids = []
+    labels = []
+    mm_token_type_ids = []
+    pixel_values_videos = []
+    video_grid_thw = []
+    video_offset = 0
 
-    for i, source in enumerate(sources):
-        try:
-            if roles[source[0]["from"]] != roles["human"]:
-                source = source[1:]
-        except:
-            print(sources)
-
-        input_id, target = [], []
-
-        input_id += _apply_training_chat_template(
+    messages = [{"role": "system", "content": "You are a helpful assistant."}]
+    messages.extend(source)
+    for message in messages:
+        raw_role = message.get("from", message.get("role"))
+        role = roles.get(raw_role, raw_role)
+        if role not in {"system", "user", "assistant"}:
+            raise ValueError(f"Unsupported conversation role: {raw_role!r}.")
+        content = message.get("value", message.get("content", ""))
+        num_videos = content.count(DEFAULT_VIDEO_TOKEN)
+        if role != "user" and num_videos:
+            raise ValueError("SceneDistill visual placeholders must appear in user messages.")
+        content = content.replace(DEFAULT_VIDEO_TOKEN, QWEN_VIDEO_PLACEHOLDER)
+        rendered = _apply_training_chat_template(
             tokenizer,
-            [{"role": "system", "content": system_message}],
+            [{"role": role, "content": content}],
+            tokenize=False,
         )
-        target += [IGNORE_INDEX] * len(input_id)
 
-        for conv in source:
-            try:
-                role = conv["role"]
-                content = conv["content"]
-            except:
-                role = conv["from"]
-                content = conv["value"]
+        processor_kwargs = {
+            "text": [rendered],
+            "images": None,
+            "padding": False,
+            "return_tensors": "pt",
+            "return_mm_token_type_ids": True,
+        }
+        if num_videos:
+            next_offset = video_offset + num_videos
+            processor_kwargs.update(
+                videos=videos[video_offset:next_offset],
+                video_metadata=video_metadata[video_offset:next_offset],
+                do_sample_frames=False,
+                do_resize=False,
+            )
+            video_offset = next_offset
+        else:
+            processor_kwargs["videos"] = None
 
-            role = roles.get(role, role)
-            if role == "user":
-                visual_tag = f"<{visual_type}>"
-                if visual_tag in content:
-                    parts = content.split(visual_tag)
-                    new_parts = []
-                    for i in range(len(parts) - 1):
-                        new_parts.append(parts[i])
-                        replacement = (
-                            "<|vision_start|>"
-                            + f"<|{visual_type}_pad|>"
-                            * grid_thw[visual_replicate_index]
-                            + "<|vision_end|>"
-                        )
-                        new_parts.append(replacement)
-                        visual_replicate_index += 1
-                    new_parts.append(parts[-1])
-                    content = "".join(new_parts)
+        encoded = processor(**processor_kwargs)
+        encoded_ids = encoded["input_ids"][0]
+        encoded_mm_types = encoded.get("mm_token_type_ids")
+        if encoded_mm_types is None:
+            raise RuntimeError("Qwen3.5 processor did not return mm_token_type_ids.")
+        encoded_mm_types = encoded_mm_types[0]
+        if encoded_ids.shape != encoded_mm_types.shape:
+            raise ValueError(
+                "Qwen3.5 token/type-id shape mismatch: "
+                f"input_ids={tuple(encoded_ids.shape)}, mm_token_type_ids={tuple(encoded_mm_types.shape)}."
+            )
 
-            conv = [{"role": role, "content": content}]
-            encode_id = _apply_training_chat_template(tokenizer, conv)
-            input_id += encode_id
-            if role in ["user", "system"]:
-                target += [IGNORE_INDEX] * len(encode_id)
-            else:
-                target_mask = encode_id.copy()
-                target_mask[:assistant_prefix_length] = [IGNORE_INDEX] * min(
-                    assistant_prefix_length, len(target_mask)
+        input_ids.append(encoded_ids)
+        mm_token_type_ids.append(encoded_mm_types)
+        if role in {"user", "system"}:
+            labels.append(torch.full_like(encoded_ids, IGNORE_INDEX))
+        else:
+            target = encoded_ids.clone()
+            target[: min(assistant_prefix_length, target.numel())] = IGNORE_INDEX
+            labels.append(target)
+
+        if num_videos:
+            grids = encoded["video_grid_thw"]
+            if grids.shape[0] != num_videos:
+                raise ValueError(
+                    f"Qwen processor returned {grids.shape[0]} video grids for {num_videos} placeholders."
                 )
-                target += target_mask
+            pixel_values_videos.append(encoded["pixel_values_videos"])
+            video_grid_thw.append(grids)
 
-        assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
-        input_ids.append(input_id)
-        targets.append(target)
+    if video_offset != len(videos) or len(videos) != len(video_metadata):
+        raise ValueError(
+            "SceneDistill video contract mismatch: "
+            f"consumed={video_offset}, videos={len(videos)}, metadata={len(video_metadata)}."
+        )
 
-    input_ids = torch.tensor(input_ids, dtype=torch.long)
-    targets = torch.tensor(targets, dtype=torch.long)
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-    )
+    result = {
+        "input_ids": torch.cat(input_ids),
+        "labels": torch.cat(labels),
+        "mm_token_type_ids": torch.cat(mm_token_type_ids),
+    }
+    if pixel_values_videos:
+        result["pixel_values_videos"] = torch.cat(pixel_values_videos, dim=0)
+        result["video_grid_thw"] = torch.cat(video_grid_thw, dim=0)
+    return result
+
+
+def _estimated_video_groups(sample: dict, max_frames: int, temporal_patch_size: int) -> int:
+    if "video" in sample:
+        num_videos = len(sample["video"]) if isinstance(sample["video"], list) else 1
+        return num_videos * ((max_frames + temporal_patch_size - 1) // temporal_patch_size)
+    visual = sample.get("images", sample.get("image"))
+    if visual is None:
+        return 0
+    num_frames = len(visual) if isinstance(visual, list) else 1
+    num_frames = min(num_frames, max_frames)
+    return (num_frames + temporal_patch_size - 1) // temporal_patch_size
 
 
 class LazySupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
+    """SceneDistill SFT dataset with one native-video path for every visual input."""
 
     def __init__(self, tokenizer: transformers.PreTrainedTokenizer, data_args):
-        super(LazySupervisedDataset, self).__init__()
+        super().__init__()
+        if (
+            data_args.model_type != "qwen3.5"
+            or getattr(data_args, "geometry_encoder_type", None) != "scene_distill"
+            or getattr(data_args, "processor", None) is None
+        ):
+            raise ValueError("SceneDistill data loading requires the complete Qwen3.5 processor.")
 
-        dataset = data_args.dataset_use.split(",")
-        dataset_list = data_list(dataset)
+        dataset_list = data_list(data_args.dataset_use.split(","))
         print(f"Loading datasets: {dataset_list}")
-        self.video_max_total_pixels = getattr(
-            data_args, "video_max_total_pixels", 1664 * 28 * 28
-        )
-        self.video_min_total_pixels = getattr(
-            data_args, "video_min_total_pixels", 256 * 28 * 28
-        )
-        self.model_type = data_args.model_type
-        if data_args.model_type == "qwen2.5vl":
-            self.get_rope_index = get_rope_index_25
-        elif data_args.model_type == "qwen3.5":
-            self.get_rope_index = get_rope_index_35
-        else:
-            self.get_rope_index = get_rope_index_2
-
-        list_data_dict = []
-
+        records = []
         for data in dataset_list:
-            file_format = data["annotation_path"].split(".")[-1]
-            if file_format == "jsonl":
-                annotations = read_jsonl(data["annotation_path"], max_samples=data_args.max_samples)
+            if data["annotation_path"].endswith(".jsonl"):
+                annotations = read_jsonl(data["annotation_path"], data_args.max_samples)
             else:
-                annotations = json.load(open(data["annotation_path"], "r"))
+                with open(data["annotation_path"], "r") as file:
+                    annotations = json.load(file)
             sampling_rate = data.get("sampling_rate", 1.0)
             if sampling_rate < 1.0:
-                annotations = random.sample(
-                    annotations, int(len(annotations) * sampling_rate)
-                )
+                annotations = random.sample(annotations, int(len(annotations) * sampling_rate))
                 print(f"sampling {len(annotations)} examples from dataset {data}")
             else:
                 rank0_print(f"dataset name: {data}")
-            for ann in annotations:
-                ann["data_path"] = data["data_path"]
-                ann["tag"] = data["tag"]
-            list_data_dict += annotations
+            for annotation in annotations:
+                annotation["data_path"] = data["data_path"]
+                annotation["tag"] = data["tag"]
+            records.extend(annotations)
 
-        print(f"Total training samples: {len(list_data_dict)}")
-
-        random.shuffle(list_data_dict)  # Randomly shuffle the data for training
-
+        print(f"Total training samples: {len(records)}")
+        if data_args.shuffle:
+            random.shuffle(records)
         print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
-        self.list_data_dict = list_data_dict
+        self.list_data_dict = records
         self.data_args = data_args
-        self.data_args.image_processor.max_pixels = data_args.max_pixels
-        self.data_args.image_processor.min_pixels = data_args.min_pixels
-        self.data_args.image_processor.size["longest_edge"] = data_args.max_pixels
-        self.data_args.image_processor.size["shortest_edge"] = data_args.min_pixels
+        self.processor = data_args.processor
+        self.video_processor = self.processor.video_processor
 
     def __len__(self):
         return len(self.list_data_dict)
 
     @property
     def lengths(self):
-        length_list = []
-        per_image_visual_tokens = _estimated_qwen3_5_visual_tokens_per_image(
-            getattr(self.data_args, "geometry_encoder_type", "vggt")
+        max_frames = int(self.data_args.video_max_frames)
+        temporal_patch_size = int(self.video_processor.temporal_patch_size)
+        patch_factor = int(self.video_processor.patch_size) * int(
+            self.video_processor.merge_size
         )
-        for sample in self.list_data_dict:
-            cur_len = sum(
-                len(conv["value"].split()) for conv in sample["conversations"]
+        max_frame_pixels = int(self.data_args.video_max_frame_pixels)
+        visual_tokens_per_group = (
+            max_frame_pixels + patch_factor**2 - 1
+        ) // patch_factor**2
+        tokens_per_group = visual_tokens_per_group + 17
+        return [
+            sum(
+                len(conv.get("value", conv.get("content", "")).split())
+                for conv in sample["conversations"]
             )
-            if "image" in sample:
-                image_num = len(sample["image"])
-            elif "images" in sample:
-                image_num = len(sample["images"])
-            elif "video" in sample:
-                image_num = getattr(self.data_args, "video_max_frames", 8)
-            else:
-                image_num = 0
-            length_list.append(image_num * per_image_visual_tokens + cur_len)
-        return length_list
+            + _estimated_video_groups(sample, max_frames, temporal_patch_size) * tokens_per_group
+            for sample in self.list_data_dict
+        ]
 
     @property
     def modality_lengths(self):
-        length_list = []
-        per_image_visual_tokens = _estimated_qwen3_5_visual_tokens_per_image(
-            getattr(self.data_args, "geometry_encoder_type", "vggt")
-        )
-        for sample in self.list_data_dict:
-            cur_len = sum(
-                len(conv["value"].split()) for conv in sample["conversations"]
-            )
-            if "image" in sample:
-                image_num = len(sample["image"])
-            elif "images" in sample:
-                image_num = len(sample["images"])
-            elif "video" in sample:
-                image_num = getattr(self.data_args, "video_max_frames", 8)
-            else:
-                image_num = 0
-            cur_len += image_num * per_image_visual_tokens
-            tag = sample.get("tag", "2d")
-            cur_len = -cur_len if tag == "2d" else cur_len
-            length_list.append(cur_len)
-        return length_list
+        lengths = self.lengths
+        return [
+            -length if sample.get("tag", "2d") == "2d" else length
+            for length, sample in zip(lengths, self.list_data_dict)
+        ]
 
     @property
     def pre_calculated_length(self):
         if "num_tokens" in self.list_data_dict[0]:
-            length_list = [sample["num_tokens"] for sample in self.list_data_dict]
-            return np.array(length_list)
-        else:
-            print("No pre-calculated length available.")
-            return np.array([1] * len(self.list_data_dict))
+            return np.array([sample["num_tokens"] for sample in self.list_data_dict])
+        print("No pre-calculated length available.")
+        return np.ones(len(self.list_data_dict), dtype=np.int64)
 
-    def process_image_unified(self, image_file):
-        processor = copy.deepcopy(self.data_args.image_processor)
-        image = Image.open(image_file).convert("RGB")
-
-        visual_processed = processor.preprocess(image, return_tensors="pt")
-        image_tensor = visual_processed["pixel_values"]
-        if isinstance(image_tensor, List):
-            image_tensor = image_tensor[0]
-        grid_thw = visual_processed["image_grid_thw"][0]
-        return image_tensor, grid_thw
-    
-    def draw_visual_marks(self, images, spar_info):
-
+    def draw_visual_marks(self, frames, spar_info):
         if spar_info is None:
             return
         info = json.loads(spar_info)
-        task_type = info["type"]
         from .draw_marker import DRAW_FUNCTIONS
-        draw_fn = DRAW_FUNCTIONS[task_type]
-        if len(images) == 1:
-            draw_fn(images[0], info)
-        else:
-            draw_fn(images, info)
-        # for j, img in enumerate(images):
-        #     # write to local
-        #     img.save(f"images/img_{j}.jpg", format="JPEG")
 
-    def process_video(self, video_file):
-        if not os.path.exists(video_file):
-            print(f"File not exist: {video_file}")
-        vr = VideoReader(video_file, num_threads=4)
-        total_frames = len(vr)
-        avg_fps = vr.get_avg_fps()
-        video_length = total_frames / avg_fps
-        interval = getattr(self.data_args, "base_interval", 4)
+        draw_fn = DRAW_FUNCTIONS[info["type"]]
+        draw_fn(frames[0] if len(frames) == 1 else frames, info)
 
-        num_frames_to_sample = round(video_length / interval)
-        video_min_frames = getattr(self.data_args, "video_min_frames", 4)
-        video_max_frames = getattr(self.data_args, "video_max_frames", 8)
+    def process_video(self, visual, data_path, spar_info=None):
+        """Load and sample one logical video without duplicating real frames."""
+        backend = "image_sequence"
+        raw_fps = 1.0
 
-        target_frames = min(
-            max(num_frames_to_sample, video_min_frames), video_max_frames
-        )
-        frame_idx = np.linspace(0, total_frames - 1, target_frames, dtype=int)
-        frame_idx = np.unique(frame_idx)
-        video = vr.get_batch(frame_idx).asnumpy()
-        fps = len(frame_idx) / video_length
-        processor = copy.deepcopy(self.data_args.image_processor)
-        processor.max_pixels = self.data_args.video_max_frame_pixels
-        processor.min_pixels = self.data_args.video_min_frame_pixels
-        processor.size["longest_edge"] = processor.max_pixels
-        processor.size["shortest_edge"] = processor.min_pixels
-        video_processed = processor.preprocess(
-            images=None, videos=video, return_tensors="pt"
-        )
-        video_tensor = video_processed["pixel_values_videos"]
-        grid_thw = video_processed["video_grid_thw"][0]
-        second_per_grid_ts = [
-            self.data_args.image_processor.temporal_patch_size / fps
-        ] * len(grid_thw)
-        return video_tensor, grid_thw, second_per_grid_ts
-    
-
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        num_base_retries = 3
-        num_final_retries = 30
-
-        # try the current sample first
-        for attempt_idx in range(num_base_retries):
-            try:
-                sample = self._get_item(i)
-                return sample
-            except Exception as e:
-                # sleep 1s in case it is a cloud disk issue
-                print(f"[Try #{attempt_idx}] Failed to fetch sample {i}. Exception:", e)
-                time.sleep(1)
-
-        # try other samples, in case it is file corruption issue
-        for attempt_idx in range(num_base_retries):
-            try:
-                next_index = min(i + 1, len(self.list_data_dict) - 1)
-                # sample_idx = random.choice(range(len(self)))
-                sample = self._get_item(next_index)
-                return sample
-            except Exception as e:
-                # no need to sleep
-                print(
-                    f"[Try other #{attempt_idx}] Failed to fetch sample {next_index}. Exception:",
-                    e,
+        if isinstance(visual, (list, tuple)):
+            if not visual:
+                raise ValueError("SceneDistill received an empty image sequence.")
+            frame_sources = [
+                frame
+                if not isinstance(frame, str) or os.path.isabs(frame)
+                else os.path.join(data_path, frame)
+                for frame in visual
+            ]
+        elif isinstance(visual, Image.Image):
+            frame_sources = [visual]
+        elif isinstance(visual, str):
+            visual_path = visual if os.path.isabs(visual) else os.path.join(data_path, visual)
+            if not os.path.exists(visual_path):
+                raise FileNotFoundError(f"Visual input does not exist: {visual_path}")
+            if os.path.isdir(visual_path):
+                frame_sources = sorted(
+                    os.path.join(visual_path, name)
+                    for name in os.listdir(visual_path)
+                    if name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp"))
                 )
-                pass
-
-        try:
-            sample = self._get_item(i)
-            return sample
-        except Exception as e:
-            raise e
-    
-    def read_video_images(self, source):
-        # read video images from the source
-        assert isinstance(source["video"], str), "video should be a string"
-        video_file = os.path.join(source["data_path"], source["video"])
-        if not os.path.exists(video_file):
-            print(f"File not exist: {video_file}")
-            raise FileNotFoundError
-        
-        def get_frame_indices(total_frames, fps=1):
-            video_length = total_frames / fps
-            interval = getattr(self.data_args, "base_interval", 2)
-            num_frames_to_sample = round(video_length / interval)
-            video_min_frames = getattr(self.data_args, "video_min_frames", 4)
-            video_max_frames = getattr(self.data_args, "video_max_frames", 8)
-            target_frames = min(
-                max(num_frames_to_sample, video_min_frames), video_max_frames
-            )
-            frame_idx = np.linspace(0, total_frames - 1, target_frames, dtype=int)
-            frame_idx = np.unique(frame_idx)
-            return frame_idx        
-
-        # check whether video_file is a directory
-        if os.path.isdir(video_file):
-            frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
-            frame_files.sort()
-            frame_idx = get_frame_indices(len(frame_files), 1)
-            images = [frame_files[i] for i in frame_idx]
-            images = [Image.open(frame).convert("RGB") for frame in images]
-        elif any([video_file.endswith(ext) for ext in [".mp4", ".avi", ".mov"]]):
-            vr = VideoReader(video_file, num_threads=4)
-            total_frames = len(vr)
-            avg_fps = vr.get_avg_fps()
-            frame_idx = get_frame_indices(total_frames, avg_fps)
-            video = vr.get_batch(frame_idx).asnumpy()
-            
-            images = [Image.fromarray(frame).convert("RGB") for frame in video]
-        return images
-
-    def _get_item(self, i) -> Dict[str, torch.Tensor]:
-        sources = self.list_data_dict[i]
-        if isinstance(i, int):
-            sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
-        video = None
-        
-        if "video" in sources[0]:
-            sources[0]["images"] = self.read_video_images(sources[0])
-            num_image = len(sources[0]["images"])
-            conv_value = sources[0]["conversations"][0]['value']
-            replacement_tokens = "".join([DEFAULT_IMAGE_TOKEN] * num_image)
-            if DEFAULT_VIDEO_TOKEN in conv_value:
-                conv_value = conv_value.replace(
-                    DEFAULT_VIDEO_TOKEN, replacement_tokens
-                )
-            elif DEFAULT_IMAGE_TOKEN in conv_value:
-                conv_value = conv_value.replace(
-                    DEFAULT_IMAGE_TOKEN, replacement_tokens
-                )
+                if not frame_sources:
+                    raise ValueError(f"Frame directory is empty: {visual_path}")
+                backend = "frame_directory"
+            elif visual_path.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+                frame_sources = [visual_path]
             else:
-                conv_value = replacement_tokens + conv_value
-
-            sources[0]["conversations"][0]["value"] = conv_value
-
-            del sources[0]["video"]
-        
-        # # replace <image>\n with <image>
-        sources[0]["conversations"][0]["value"] = sources[0]["conversations"][0]["value"].replace(
-            f"{DEFAULT_IMAGE_TOKEN}\n", DEFAULT_IMAGE_TOKEN
-        )
-
-        # rename images tag
-        if "images" in sources[0]:
-            sources[0]["image"] = sources[0]["images"]
-
-        # notice that we use images as the tag
-        if "image" in sources[0]:
-            image_folder = self.list_data_dict[i]["data_path"]
-            image_file = self.list_data_dict[i]["image"]
-            if isinstance(image_file, List):
-
-                if isinstance(image_file[0], str):
-                    image_file = [
-                        os.path.join(image_folder, file) for file in image_file
-                    ]
-                    image_file = [Image.open(img).convert("RGB") for img in image_file]
-                elif isinstance(image_file[0], Image.Image):
-                    pass
-                else:
-                    raise NotImplementedError
-                # draw visual markers
-                self.draw_visual_marks(image_file, sources[0].get("spar_info", None))
-
-                image, grid_thw, geometry_encoder_inputs = [], [], []
-                for file in image_file:
-                    ret = prepare_image_inputs(
-                        file,
-                        self.data_args.image_processor,
-                        model_type=self.model_type,
-                        geometry_encoder_type=getattr(self.data_args, "geometry_encoder_type", "vggt"),
+                reader = VideoReader(visual_path, num_threads=4)
+                total_frames = len(reader)
+                raw_fps = float(reader.get_avg_fps())
+                if total_frames <= 0 or raw_fps <= 0:
+                    raise ValueError(
+                        f"Invalid video metadata for {visual_path}: frames={total_frames}, fps={raw_fps}."
                     )
-                    image.append(ret["pixel_values"])
-                    geometry_encoder_inputs.append(ret["geometry_encoder_inputs"])
-                    grid_thw.append(ret["image_grid_thw"])
-            else:
-                raise NotImplementedError
-
-            grid_thw_merged = copy.deepcopy(grid_thw)
-            grid_thw_merged = [
-                get_qwen3_5_visual_token_count(
-                    merged_thw,
-                    self.data_args.image_processor.merge_size,
-                    geometry_encoder_type=getattr(self.data_args, "geometry_encoder_type", "vggt"),
+                duration = total_frames / raw_fps
+                target_frames = round(duration / float(self.data_args.base_interval))
+                target_frames = min(
+                    max(target_frames, int(self.data_args.video_min_frames)),
+                    int(self.data_args.video_max_frames),
+                    total_frames,
                 )
-                if self.model_type == "qwen3.5"
-                else merged_thw.prod() // self.data_args.image_processor.merge_size**2
-                for merged_thw in grid_thw_merged
+                indices = np.unique(
+                    np.linspace(0, total_frames - 1, target_frames).round().astype(np.int64)
+                )
+                arrays = reader.get_batch(indices).asnumpy()
+                frames = [Image.fromarray(array).convert("RGB") for array in arrays]
+                backend = "decord"
+                frame_sources = None
+
+        if frame_sources is not None:
+            total_frames = len(frame_sources)
+            target_frames = min(total_frames, int(self.data_args.video_max_frames))
+            indices = np.unique(
+                np.linspace(0, total_frames - 1, target_frames).round().astype(np.int64)
+            )
+            selected = [frame_sources[int(index)] for index in indices]
+            frames = [
+                frame.convert("RGB") if isinstance(frame, Image.Image) else Image.open(frame).convert("RGB")
+                for frame in selected
             ]
-            sources = copy.deepcopy([e["conversations"] for e in sources])
-            data_dict = preprocess_qwen_2_visual(
-                sources,
-                self.tokenizer,
-                grid_thw=grid_thw_merged,
-                visual_type="image",
-                model_type=self.model_type,
-            )
-            position_ids, _ = self.get_rope_index(
-                self.data_args.image_processor.merge_size,
-                data_dict["input_ids"],
-                torch.stack(grid_thw, dim=0),
-            )
-        elif "video" in sources[0]:
-            video_file = self.list_data_dict[i]["video"]
-            video_folder = self.list_data_dict[i]["data_path"]
-            if isinstance(video_file, List):
-                if len(video_file) > 1:
-                    video_file = [
-                        os.path.join(video_folder, file) for file in video_file
-                    ]
-                    results = [self.process_video(file) for file in video_file]
-                    video, grid_thw, second_per_grid_ts = zip(*results)
-                else:
-                    video_file = video_file[0]
-                    video_file = os.path.join(video_folder, video_file)
-                    video, grid_thw, second_per_grid_ts = self.process_video(video_file)
-                    video = [video]
+
+        self.draw_visual_marks(frames, spar_info)
+        prepared = prepare_video_inputs(
+            frames,
+            self.video_processor,
+            min_pixels=int(self.data_args.video_min_frame_pixels),
+            max_pixels=int(self.data_args.video_max_frame_pixels),
+        )
+        video_frames = prepared["video_frames"]
+        metadata = VideoMetadata(
+            total_num_frames=int(total_frames),
+            fps=float(raw_fps),
+            width=int(video_frames.shape[-1]),
+            height=int(video_frames.shape[-2]),
+            duration=float(total_frames / raw_fps),
+            video_backend=backend,
+            frames_indices=[int(index) for index in indices],
+        )
+        return video_frames, metadata, prepared["geometry_encoder_inputs"]
+
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        return self._get_item(index)
+
+    def _get_item(self, index) -> Dict[str, torch.Tensor]:
+        sample = copy.deepcopy(self.list_data_dict[index])
+        visual_fields = [name for name in ("image", "images", "video") if name in sample]
+        if len(visual_fields) > 1:
+            raise ValueError(f"A sample must use exactly one visual field, got {visual_fields}.")
+
+        visual_objects = []
+        if visual_fields:
+            visual_field = visual_fields[0]
+            visual_value = sample[visual_field]
+            if visual_field == "video":
+                visual_objects = list(visual_value) if isinstance(visual_value, list) else [visual_value]
             else:
-                video_file = os.path.join(video_folder, video_file)
-                video, grid_thw, second_per_grid_ts = self.process_video(video_file)
-                video = [video]
-            grid_thw_merged = copy.deepcopy(grid_thw)
-            if not isinstance(grid_thw, Sequence):
-                grid_thw_merged = [grid_thw_merged]
-                grid_thw = [grid_thw]
-            grid_thw_merged = [
-                merged_thw.prod() // self.data_args.image_processor.merge_size**2
-                for merged_thw in grid_thw_merged
-            ]
-            sources = copy.deepcopy([e["conversations"] for e in sources])
-            data_dict = preprocess_qwen_2_visual(
-                sources,
-                self.tokenizer,
-                grid_thw=grid_thw_merged,
-                visual_type="video",
-                model_type=self.model_type,
-            )
-            position_ids, _ = self.get_rope_index(
-                self.data_args.image_processor.merge_size,
-                data_dict["input_ids"],
-                video_grid_thw=torch.stack(grid_thw, dim=0),
-                second_per_grid_ts=second_per_grid_ts,
-            )
-        else:
-            grid_thw_merged = None
-            sources = copy.deepcopy([e["conversations"] for e in sources])
-            data_dict = preprocess_qwen_2_visual(
-                sources,
-                self.tokenizer,
-                grid_thw=grid_thw_merged,
-                model_type=self.model_type,
-            )
-            position_ids = (
-                torch.arange(0, data_dict["input_ids"].size(1))
-                .view(1, -1)
-                .unsqueeze(0)
-                .expand(3, -1, -1)
+                visual_objects = [visual_value]
+
+        conversations = sample["conversations"]
+        placeholder_count = sum(
+            message.get("value", message.get("content", "")).count(DEFAULT_IMAGE_TOKEN)
+            + message.get("value", message.get("content", "")).count(DEFAULT_VIDEO_TOKEN)
+            for message in conversations
+        )
+        if visual_objects and placeholder_count == 0:
+            for message in conversations:
+                role = message.get("from", message.get("role"))
+                if role in {"human", "user"}:
+                    key = "value" if "value" in message else "content"
+                    message[key] = DEFAULT_VIDEO_TOKEN * len(visual_objects) + "\n" + message[key]
+                    break
+        elif len(visual_objects) > 1 and placeholder_count == 1:
+            for message in conversations:
+                key = "value" if "value" in message else "content"
+                content = message[key]
+                if DEFAULT_IMAGE_TOKEN in content or DEFAULT_VIDEO_TOKEN in content:
+                    token = DEFAULT_IMAGE_TOKEN if DEFAULT_IMAGE_TOKEN in content else DEFAULT_VIDEO_TOKEN
+                    message[key] = content.replace(token, DEFAULT_VIDEO_TOKEN * len(visual_objects), 1)
+                    break
+        elif placeholder_count != len(visual_objects):
+            raise ValueError(
+                "SceneDistill placeholder/video mismatch: "
+                f"placeholders={placeholder_count}, logical_videos={len(visual_objects)}."
             )
 
-        if isinstance(i, int):
-            data_dict = dict(
-                input_ids=data_dict["input_ids"][0],
-                labels=data_dict["labels"][0],
-                position_ids=position_ids,
+        for message in conversations:
+            key = "value" if "value" in message else "content"
+            message[key] = message[key].replace(DEFAULT_IMAGE_TOKEN, DEFAULT_VIDEO_TOKEN)
+        final_placeholder_count = sum(
+            message.get("value", message.get("content", "")).count(DEFAULT_VIDEO_TOKEN)
+            for message in conversations
+        )
+        if final_placeholder_count != len(visual_objects):
+            raise ValueError(
+                "SceneDistill final placeholder/video mismatch: "
+                f"placeholders={final_placeholder_count}, logical_videos={len(visual_objects)}."
             )
 
-        if "image" in self.list_data_dict[i]:
-            data_dict["pixel_values"] = image
-            data_dict["image_grid_thw"] = grid_thw
-            if getattr(self.data_args, "use_geometry_encoder", False):
-                data_dict["geometry_encoder_inputs"] = geometry_encoder_inputs
-        # video exist in the data
-        elif "video" in self.list_data_dict[i]:
-            data_dict["pixel_values_videos"] = video
-            data_dict["video_grid_thw"] = grid_thw
-        
-        data_dict["tag"] = self.list_data_dict[i].get("tag", "2d")
-        return data_dict
+        videos = []
+        metadata = []
+        geometry_inputs = []
+        for visual in visual_objects:
+            video, video_metadata, geometry = self.process_video(
+                visual,
+                sample["data_path"],
+                sample.get("spar_info"),
+            )
+            videos.append(video)
+            metadata.append(video_metadata)
+            geometry_inputs.append(geometry)
 
-
-def pad_and_cat(tensor_list):
-    max_length = max(tensor.shape[2] for tensor in tensor_list)
-
-    padded_tensors = []
-    for tensor in tensor_list:
-        pad_length = max_length - tensor.shape[2]
-        padded_tensor = torch.nn.functional.pad(tensor, (0, pad_length), "constant", 1)
-        padded_tensors.append(padded_tensor)
-
-    stacked_tensor = torch.cat(padded_tensors, dim=1)
-
-    return stacked_tensor
+        data = preprocess_video(
+            conversations,
+            self.tokenizer,
+            self.processor,
+            videos,
+            metadata,
+        )
+        if videos:
+            data["geometry_encoder_inputs"] = geometry_inputs
+        data["tag"] = sample.get("tag", "2d")
+        return data
 
 
 @dataclass
-class DataCollatorForSupervisedDataset(object):
-    """Collate examples for supervised fine-tuning."""
-
+class DataCollatorForSupervisedDataset:
     tokenizer: transformers.PreTrainedTokenizer
+    spatial_merge_size: int
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels, position_ids = tuple(
-            [instance[key] for instance in instances]
-            for key in ("input_ids", "labels", "position_ids")
-        )
         input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+            [instance["input_ids"] for instance in instances],
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id,
         )
         labels = torch.nn.utils.rnn.pad_sequence(
-            labels, batch_first=True, padding_value=IGNORE_INDEX
+            [instance["labels"] for instance in instances],
+            batch_first=True,
+            padding_value=IGNORE_INDEX,
         )
-        position_ids = pad_and_cat(position_ids)
-        input_ids = input_ids[:, : self.tokenizer.model_max_length]
-        labels = labels[:, : self.tokenizer.model_max_length]
-        position_ids = position_ids[:, :, : self.tokenizer.model_max_length]
-        batch = dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+        mm_token_type_ids = torch.nn.utils.rnn.pad_sequence(
+            [instance["mm_token_type_ids"] for instance in instances],
+            batch_first=True,
+            padding_value=0,
         )
-        images = list(
-            itertools.chain(
-                *(
-                    instance["pixel_values"]
-                    for instance in instances
-                    if "pixel_values" in instance
-                )
-            )
-        )
-        videos = list(
-            itertools.chain(
-                *(
-                    instance["pixel_values_videos"]
-                    for instance in instances
-                    if "pixel_values_videos" in instance
-                )
-            )
-        )
-        if len(images) != 0:
-            concat_images = torch.cat([image for image in images], dim=0)
-            grid_thw = list(
-                itertools.chain(
-                    *(
-                        instance["image_grid_thw"]
-                        for instance in instances
-                        if "image_grid_thw" in instance
-                    )
-                )
-            )
-            grid_thw = torch.stack(grid_thw, dim=0)
-        else:
-            concat_images = None
-            grid_thw = None
+        max_length = self.tokenizer.model_max_length
+        input_ids = input_ids[:, :max_length]
+        batch = {
+            "input_ids": input_ids,
+            "labels": labels[:, :max_length],
+            "attention_mask": input_ids.ne(self.tokenizer.pad_token_id),
+            "mm_token_type_ids": mm_token_type_ids[:, :max_length],
+        }
 
-        if len(videos) != 0:
-            concat_videos = torch.cat([video for video in videos], dim=0)
-            video_grid_thw = list(
-                itertools.chain(
-                    *(
-                        instance["video_grid_thw"]
-                        for instance in instances
-                        if "video_grid_thw" in instance
-                    )
-                )
+        visual_instances = [instance for instance in instances if "pixel_values_videos" in instance]
+        if visual_instances:
+            batch["pixel_values_videos"] = torch.cat(
+                [instance["pixel_values_videos"] for instance in visual_instances], dim=0
             )
-            video_grid_thw = torch.stack(video_grid_thw, dim=0)
-        else:
-            concat_videos = None
-            video_grid_thw = None
-
-        batch["pixel_values"] = concat_images
-        batch["image_grid_thw"] = grid_thw
-        batch["pixel_values_videos"] = concat_videos
-        batch["video_grid_thw"] = video_grid_thw
-        batch["position_ids"] = position_ids
-                
-        # assume all data in a batch has geometry_encoder_inputs
-        if "geometry_encoder_inputs" in instances[0]:
-            geometry_encoder_inputs = [torch.stack(instance["geometry_encoder_inputs"]) for instance in instances]
-            batch["geometry_encoder_inputs"] = geometry_encoder_inputs
+            batch["video_grid_thw"] = torch.cat(
+                [instance["video_grid_thw"] for instance in visual_instances], dim=0
+            )
+            batch["geometry_encoder_inputs"] = [
+                video
+                for instance in visual_instances
+                for video in instance["geometry_encoder_inputs"]
+            ]
+            if batch["video_grid_thw"].shape[0] != len(batch["geometry_encoder_inputs"]):
+                raise ValueError(
+                    "SceneDistill collator lost video order: "
+                    f"grids={batch['video_grid_thw'].shape[0]}, "
+                    f"geometry_inputs={len(batch['geometry_encoder_inputs'])}."
+                )
+            expected_video_tokens = sum(
+                int(t) * int(h) * int(w) // (self.spatial_merge_size**2)
+                for t, h, w in batch["video_grid_thw"].tolist()
+            )
+            actual_video_tokens = int((batch["mm_token_type_ids"] == 2).sum().item())
+            if actual_video_tokens != expected_video_tokens:
+                raise ValueError(
+                    "SceneDistill sequence truncation or packing mismatch: "
+                    f"video_tokens={actual_video_tokens}, expected={expected_video_tokens}."
+                )
             tags = [instance.get("tag", "3d") for instance in instances]
-            assert len(set(tags)) == 1, "all data in a batch should have the same tag"
+            if len(set(tags)) != 1:
+                raise ValueError("All samples in a SceneDistill batch must share the same tag.")
             batch["tag"] = tags[0]
         return batch
 
 
-@dataclass
-class FlattenedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset):
-    """Collate examples into packed sequence with multi-modal support."""
-
-    tokenizer: transformers.PreTrainedTokenizer
-
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels, position_ids = tuple(
-            [instance[key] for instance in instances]
-            for key in ("input_ids", "labels", "position_ids")
-        )
-
-        seq_lens = torch.tensor(
-            [0] + [len(seq) for seq in input_ids], dtype=torch.int32
-        )
-        cumsum_seq_lens = torch.cumsum(seq_lens, dim=0, dtype=torch.int32)
-        input_ids = torch.cat(input_ids, dim=0)
-        labels = torch.cat(labels, dim=0)
-        position_ids = torch.cat(position_ids, dim=2)
-
-        batch = dict(
-            input_ids=input_ids.unsqueeze(0),
-            labels=labels.unsqueeze(0),
-            attention_mask=cumsum_seq_lens,
-            position_ids=position_ids,
-        )
-        images = list(
-            itertools.chain(
-                *(
-                    instance["pixel_values"]
-                    for instance in instances
-                    if "pixel_values" in instance
-                )
-            )
-        )
-        videos = list(
-            itertools.chain(
-                *(
-                    instance["pixel_values_videos"]
-                    for instance in instances
-                    if "pixel_values_videos" in instance
-                )
-            )
-        )
-        if len(images) != 0:
-            concat_images = torch.cat([image for image in images], dim=0)
-            grid_thw = list(
-                itertools.chain(
-                    *(
-                        instance["image_grid_thw"]
-                        for instance in instances
-                        if "image_grid_thw" in instance
-                    )
-                )
-            )
-            grid_thw = torch.stack(grid_thw, dim=0)
-        else:
-            concat_images = None
-            grid_thw = None
-
-        if len(videos) != 0:
-            concat_videos = torch.cat([video for video in videos], dim=0)
-            video_grid_thw = list(
-                itertools.chain(
-                    *(
-                        instance["video_grid_thw"]
-                        for instance in instances
-                        if "video_grid_thw" in instance
-                    )
-                )
-            )
-            video_grid_thw = torch.stack(video_grid_thw, dim=0)
-        else:
-            concat_videos = None
-            video_grid_thw = None
-
-        batch["pixel_values"] = concat_images
-        batch["image_grid_thw"] = grid_thw
-        batch["pixel_values_videos"] = concat_videos
-        batch["video_grid_thw"] = video_grid_thw
-
-                
-        # assume all data in a batch has geometry_encoder_inputs
-        if "geometry_encoder_inputs" in instances[0]:
-            raise NotImplementedError("FlattenedDataCollatorForSupervisedDataset does not support geometry_encoder_inputs")
-
-        return batch
-
-
 def make_supervised_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, data_args
+    tokenizer: transformers.PreTrainedTokenizer,
+    data_args,
 ) -> Dict:
-    """Make dataset and collator for supervised fine-tuning."""
     train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_args=data_args)
-    if data_args.data_flatten:
-        data_collator = FlattenedDataCollatorForSupervisedDataset(tokenizer=tokenizer)
-        return dict(
-            train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator
-        )
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    return dict(
-        train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator
-    )
-
-
-if __name__ == "__main__":
-    pass
+    return {
+        "train_dataset": train_dataset,
+        "eval_dataset": None,
+        "data_collator": DataCollatorForSupervisedDataset(
+            tokenizer=tokenizer,
+            spatial_merge_size=int(data_args.processor.video_processor.merge_size),
+        ),
+    }

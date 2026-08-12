@@ -57,7 +57,7 @@ setup(
         "decord",
         "zss",
         "protobuf==3.20",
-        "qwen_vl_utils",
+        "qwen_vl_utils==0.0.14",
         "scipy",
         "terminaltables"
     ],

@@ -8,12 +8,7 @@ from lmms_eval.models.qwen3_5 import Qwen3_5
 class Qwen3_5SceneDistill(Qwen3_5):
     """LMMS-Eval adapter for SceneDistill checkpoints."""
 
-    def __init__(
-        self,
-        compatibility_geometry_encoder_type: str = "scene_distill",
-        **kwargs,
-    ) -> None:
-        self._compatibility_geometry_encoder_type = compatibility_geometry_encoder_type
+    def __init__(self, **kwargs) -> None:
         kwargs.pop("geometry_encoder_path", None)
         super().__init__(**kwargs)
 
@@ -30,11 +25,6 @@ class Qwen3_5SceneDistill(Qwen3_5):
                 "geometry_encoder_type='scene_distill' or architecture "
                 "Qwen3_5ForConditionalGenerationWithSceneDistill."
             )
-        if self._compatibility_geometry_encoder_type != "scene_distill":
-            raise ValueError(
-                "qwen3_5_scene_distill requires compatibility_geometry_encoder_type='scene_distill'."
-            )
-
         setattr(config, "use_geometry_encoder", True)
         setattr(config, "geometry_encoder_type", "scene_distill")
         setattr(config, "geometry_encoder_freeze", True)

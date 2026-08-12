@@ -32,14 +32,11 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     dataset_use: str = field(default="")
-    video_max_frames: Optional[int] = field(default=8)
-    video_min_frames: Optional[int] = field(default=4)
-    data_flatten: bool = field(default=False)
-    base_interval: int = field(default=2)
-    max_pixels: int = field(default=28 * 28 * 576)
-    min_pixels: int = field(default=28 * 28 * 16)
-    video_max_frame_pixels: int = field(default=32 * 28 * 28)
-    video_min_frame_pixels: int = field(default=4 * 28 * 28)
+    video_max_frames: Optional[int] = field(default=16)
+    video_min_frames: Optional[int] = field(default=8)
+    base_interval: int = field(default=1)
+    video_max_frame_pixels: int = field(default=512 * 512)
+    video_min_frame_pixels: int = field(default=28 * 28 * 16)
     max_samples: int = field(default=-1)
     shuffle: bool = field(default=True)
 

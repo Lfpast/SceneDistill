@@ -12,15 +12,13 @@ from PIL import Image
 from tqdm import tqdm
 import transformers
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer
+from transformers.video_utils import VideoMetadata
 
 from lmms_eval import utils
 from lmms_eval.api.instance import Instance
 from lmms_eval.api.model import lmms
 from lmms_eval.api.registry import register_model
-from lmms_eval.models.model_utils.load_video import read_video_pyav_pil
-from qwen_vl.data.utils import (
-    build_qwen3_5_geometry_inputs,
-)
+from qwen_vl.data.utils import load_and_preprocess_video_frames
 
 
 MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.3.0")
@@ -76,10 +74,7 @@ def detect_qwen3_5_fast_path_runtime():
 
 
 def move_qwen3_5_eval_inputs_to_device(inputs, device):
-    inputs = inputs.to(device)
-    if "geometry_encoder_inputs" in inputs:
-        inputs["geometry_encoder_inputs"] = [tensor.to(device) for tensor in inputs["geometry_encoder_inputs"]]
-    return inputs
+    return inputs.to(device)
 
 
 def parse_qwen3_5_layer_indices(value, name: str) -> Optional[List[int]]:
@@ -111,13 +106,9 @@ class Qwen3_5(lmms):
         batch_size: Optional[Union[int, str]] = 1,
         use_cache: bool = True,
         use_flash_attention_2: Optional[bool] = False,
-        min_pixels: int = 256 * 28 * 28,
-        max_pixels: int = 1605632,
+        min_pixels: int = 12544,
+        max_pixels: int = 262144,
         max_num_frames: int = 32,
-        use_custom_video_loader: Optional[bool] = False,
-        fps: Optional[float] = None,
-        max_image_size: Optional[int] = None,
-        add_frame_index: bool = False,
         disable_thinking: bool = True,
         strip_thinking: bool = True,
         max_length: Optional[int] = None,
@@ -130,13 +121,9 @@ class Qwen3_5(lmms):
         require_qwen3_5_support()
         patch_qwen3_5_flash_attention()
 
-        self.use_custom_video_loader = use_custom_video_loader
-        self.fps = fps
-        self.max_image_size = max_image_size
         self.max_num_frames = max_num_frames
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
-        self.add_frame_index = add_frame_index
         self.disable_thinking = disable_thinking
         self.strip_thinking = strip_thinking
         self.fast_path_runtime = detect_qwen3_5_fast_path_runtime()
@@ -284,9 +271,6 @@ class Qwen3_5(lmms):
     def world_size(self):
         return self._world_size
 
-    def uses_geometry_encoder_for_eval(self):
-        return bool(getattr(self.config, "use_geometry_encoder", False))
-
     def loglikelihood(self, requests: List[Instance]) -> List[Tuple[float, bool]]:
         raise NotImplementedError("Loglikelihood is not implemented for Qwen3.5")
 
@@ -301,64 +285,84 @@ class Qwen3_5(lmms):
             return visual_group[0]
         return visual_group
 
-    def _sample_video_frames(self, video_path: str) -> List[Image.Image]:
-        if self.use_custom_video_loader:
-            return read_video_pyav_pil(
-                video_path,
-                num_frm=self.max_num_frames,
-                fps=self.fps,
-                max_image_size=self.max_image_size,
-            )
-
+    def _sample_video_frames(self, video_path: str):
         vr = decord.VideoReader(video_path)
         frame_count = len(vr)
-        if frame_count <= self.max_num_frames:
-            indices = np.arange(frame_count)
-        else:
-            indices = np.linspace(0, frame_count - 1, self.max_num_frames).astype(int)
-        return [Image.fromarray(vr[i].asnumpy()).convert("RGB") for i in indices]
+        fps = float(vr.get_avg_fps())
+        if frame_count <= 0 or fps <= 0:
+            raise ValueError(f"Invalid video metadata for {video_path}: frames={frame_count}, fps={fps}.")
+        num_frames = min(frame_count, self.max_num_frames)
+        indices = np.unique(
+            np.linspace(0, frame_count - 1, num_frames).round().astype(np.int64)
+        )
+        frames = [Image.fromarray(vr[int(index)].asnumpy()).convert("RGB") for index in indices]
+        metadata = VideoMetadata(
+            total_num_frames=int(frame_count),
+            fps=fps,
+            duration=float(frame_count / fps),
+            video_backend="decord",
+            frames_indices=[int(index) for index in indices],
+        )
+        return frames, metadata
 
     def _build_sample(self, context, visual):
-        sample_images = []
+        sampled_videos = []
+        video_metadata = []
         user_content = []
 
-        if isinstance(visual, str) and visual.endswith((".mp4", ".avi", ".mov", ".mkv", ".webm")):
-            frames = self._sample_video_frames(visual)
-            for idx, frame in enumerate(frames):
-                if self.add_frame_index:
-                    user_content.append({"type": "text", "text": f"Frame-{idx}: "})
-                # Keep raw PIL inputs in the chat payload to avoid per-frame base64 encoding.
-                user_content.append({"type": "image", "image": frame})
-                sample_images.append(frame)
+        if isinstance(visual, str) and visual.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm")):
+            visual_groups = [self._sample_video_frames(visual)]
         elif isinstance(visual, str) and is_image_path(visual):
-            frame = Image.open(visual).convert("RGB")
-            user_content.append({"type": "image", "image": frame})
-            sample_images.append(frame)
+            visual_groups = [([Image.open(visual).convert("RGB")], None)]
         elif isinstance(visual, Image.Image):
-            frame = visual.convert("RGB")
-            user_content.append({"type": "image", "image": frame})
-            sample_images.append(frame)
+            visual_groups = [([visual.convert("RGB")], None)]
         elif isinstance(visual, (list, tuple)) and all(isinstance(v, Image.Image) for v in visual):
-            for idx, frame in enumerate(visual):
-                rgb = frame.convert("RGB")
-                if self.add_frame_index:
-                    user_content.append({"type": "text", "text": f"Frame-{idx}: "})
-                user_content.append({"type": "image", "image": rgb})
-                sample_images.append(rgb)
+            visual_groups = [([frame.convert("RGB") for frame in visual], None)]
         elif isinstance(visual, (list, tuple)) and all(isinstance(v, str) and is_image_path(v) for v in visual):
-            for idx, frame_path in enumerate(visual):
-                rgb = Image.open(frame_path).convert("RGB")
-                if self.add_frame_index:
-                    user_content.append({"type": "text", "text": f"Frame-{idx}: "})
-                user_content.append({"type": "image", "image": rgb})
-                sample_images.append(rgb)
+            visual_groups = [([Image.open(path).convert("RGB") for path in visual], None)]
+        elif isinstance(visual, (list, tuple)) and all(
+            isinstance(v, str) and v.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm"))
+            for v in visual
+        ):
+            visual_groups = [self._sample_video_frames(path) for path in visual]
+        elif visual is None:
+            visual_groups = []
+        else:
+            raise TypeError(f"Unsupported Qwen3.5 visual input: {type(visual)}")
+
+        for frames, metadata in visual_groups:
+            total_frames = len(frames)
+            if metadata is None:
+                num_frames = min(total_frames, self.max_num_frames)
+                indices = np.unique(
+                    np.linspace(0, total_frames - 1, num_frames).round().astype(np.int64)
+                )
+                frames = [frames[int(index)] for index in indices]
+                metadata = VideoMetadata(
+                    total_num_frames=int(total_frames),
+                    fps=1.0,
+                    duration=float(total_frames),
+                    video_backend="image_sequence",
+                    frames_indices=[int(index) for index in indices],
+                )
+            video = load_and_preprocess_video_frames(
+                frames,
+                self.processor.video_processor,
+                min_pixels=self.min_pixels,
+                max_pixels=self.max_pixels,
+            )
+            metadata.width = int(video.shape[-1])
+            metadata.height = int(video.shape[-2])
+            sampled_videos.append(video)
+            video_metadata.append(metadata)
+            user_content.append({"type": "video", "video": video})
 
         user_content.append({"type": "text", "text": context})
         message = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": user_content},
         ]
-        return message, sample_images
+        return message, sampled_videos, video_metadata
 
     def generate_until(self, requests: List[Instance]) -> List[str]:
         res = []
@@ -387,12 +391,14 @@ class Qwen3_5(lmms):
                     raise ValueError(f"Expected `gen_kwargs['until']` to be Union[str, list], got {type(until)}")
 
             messages = []
-            sample_images = []
+            sample_videos = []
+            sample_video_metadata = []
             for context, raw_visual in zip(contexts, batched_visuals):
                 visual = self._normalize_visual(raw_visual)
-                message, images = self._build_sample(context, visual)
+                message, videos, metadata = self._build_sample(context, visual)
                 messages.append(message)
-                sample_images.append(images)
+                sample_videos.extend(videos)
+                sample_video_metadata.extend(metadata)
 
             chat_template_kwargs = {
                 "tokenize": False,
@@ -404,21 +410,15 @@ class Qwen3_5(lmms):
             text_batch = text if isinstance(text, list) else [text]
             inputs = self.processor(
                 text=text_batch,
-                images=sample_images if any(len(images) > 0 for images in sample_images) else None,
-                videos=None,
+                images=None,
+                videos=sample_videos or None,
+                video_metadata=sample_video_metadata or None,
+                do_sample_frames=False,
+                do_resize=False,
+                return_mm_token_type_ids=True,
                 padding=True,
                 return_tensors="pt",
             )
-            if self.uses_geometry_encoder_for_eval():
-                if len(sample_images) != 1:
-                    raise ValueError("Qwen3.5 geometry eval currently expects per-device batch size 1.")
-                geometry_encoder_type = getattr(self.config, "geometry_encoder_type", "vggt")
-                geometry_encoder_inputs = build_qwen3_5_geometry_inputs(
-                    sample_images[0],
-                    inputs["image_grid_thw"],
-                    geometry_encoder_type=geometry_encoder_type,
-                )
-                inputs["geometry_encoder_inputs"] = [torch.stack(geometry_encoder_inputs)]
             preprocess_elapsed = time.perf_counter() - batch_start
 
             if self.device_map == "auto":
