@@ -96,7 +96,7 @@ llm_layer_features[m]:
     per-frame shape = (17 + P_f, D_l)
 ```
 
-捕获点位于 decoder layer 完成之后。当前自定义 LLM 循环在 [modeling_qwen3_5.py:366–398](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:366) 执行 decoder layer 和可选 fusion；Stage 2 将在同一循环中仅捕获指定的六层，避免启用全部层的 `output_hidden_states`。
+捕获点位于目标 decoder layer 执行之前。因此 zero-based `[4,8,12,16,20,24]` 精确表示 1-based 第 5、9、13、17、21、25 层的输入。当前自定义 LLM 循环在 [modeling_qwen3_5.py:366–398](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:366) 执行 decoder layer 和可选 fusion；Stage 2 在同一循环中仅捕获指定的六层输入，避免启用全部层的 `output_hidden_states`。
 
 依赖版本继续以仓库固定的 Transformers 5.3.0 为准，[setup.py:9–13](/home/jackson/python/SceneDistill/SpatialStack/setup.py:9)，并以 [Transformers v5.3.0 Qwen3.5 官方实现](https://github.com/huggingface/transformers/blob/v5.3.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py) 校准输出语义。
 
@@ -133,7 +133,7 @@ $$
 其中每帧：
 
 - Q：该帧的 17 个 `1024-D` camera/scene tokens。
-- K/V：该帧当前 LLM 层的完整 image span，即 `17 special + P_f visual`，维度为 `D_l`。
+- K/V：该帧当前目标 LLM 层输入中的完整 image span，即 `17 special + P_f visual`，维度为 `D_l`。
 - 不读取文本或其他帧。
 - 公用 `FrameCrossAttentionLayer` 的不同 Q/KV 维度投影同时服务 Pre/Post；两条路径使用不同实例、互不共享参数，[scene_distill_module.py:51](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:51)。
 - 其机制源自 CamDistill 的 Q/K/V projection、QK norm、SDPA、FFN 和 LayerScale，[camdistill_model.py:18–137](/home/jackson/python/CamDistill/camera_movement_sft/plugins/camdistill_model.py:18)。
@@ -314,11 +314,11 @@ capture_hidden_state_mask: Optional[torch.Tensor] = None
 
 - 参数为空时，现有所有模型路径完全不变。
 - Stage 2 传入固定层 `[4,8,12,16,20,24]`。
-- 每个目标 decoder layer 完成后，用 image-span mask 立即截取对应 hidden states。
+- 每个目标 decoder layer 执行前，用 image-span mask 立即截取对应输入 hidden states。
 - 只保留六个 masked tensors，不保存全部 LLM 层和全部文本序列。
 - 按层号升序返回 tuple，wrapper 再逐项验证层数与形状。
 - 不 `detach()` LLM features，使 post loss 能监督 LLM。
-- 捕获发生在 decoder layer 输出后、最终 RMSNorm 前。
+- 捕获发生在目标 decoder layer 执行前、最终 RMSNorm 前。
 - 不注册长期 forward hooks，避免梯度 checkpoint 重算时覆盖缓存或残留计算图。
 
 Stage 1 已使用 `image_mask[...,0]` 定位 visual positions，[modeling_qwen3_5.py:380–396](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:380)。Stage 2 复用该 mask 约定。
@@ -512,7 +512,7 @@ sbatch \
 2. **固定 LLM 层**
    - 常量严格等于 `(4,8,12,16,20,24)`。
    - 缺少任一层、层数小于 25、顺序不符时 fail fast。
-   - 捕获的是 decoder layer 输出，不是 embedding 输入或最终 norm 输出。
+   - 捕获的是 1-based 第 5、9、13、17、21、25 个 decoder layer 的输入，不是这些层的输出或最终 norm 输出。
 
 3. **LLM image-span K/V**
    - 每帧 K/V 顺序严格为 `[17 specials, visual]`。

@@ -402,6 +402,9 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         for layer_idx, decoder_layer in enumerate(self.layers[: self.config.num_hidden_layers]):
             layer_mask = linear_attn_mask if decoder_layer.layer_type == "linear_attention" else causal_mask
 
+            if layer_idx in capture_layer_set:
+                captured_hidden_states.append(hidden_states[capture_hidden_state_mask])
+
             hidden_states = decoder_layer(
                 hidden_states,
                 position_embeddings=position_embeddings,
@@ -412,9 +415,6 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
                 cache_position=cache_position,
                 **kwargs,
             )
-
-            if layer_idx in capture_layer_set:
-                captured_hidden_states.append(hidden_states[capture_hidden_state_mask])
 
             if (
                 geometry_layer_features is not None

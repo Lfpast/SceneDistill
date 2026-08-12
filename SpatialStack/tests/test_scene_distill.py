@@ -488,7 +488,7 @@ def _import_qwen35_module_or_skip(module_name):
         pytest.skip(f"Qwen3.5 Transformers runtime is unavailable: {error}")
 
 
-def test_selective_llm_capture_is_masked_post_layer_and_pre_norm(monkeypatch):
+def test_selective_llm_capture_is_masked_layer_input_and_pre_norm(monkeypatch):
     modeling_qwen3_5 = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5"
     )
@@ -538,7 +538,7 @@ def test_selective_llm_capture_is_masked_post_layer_and_pre_norm(monkeypatch):
 
     assert len(outputs.hidden_states) == POST_DISTILL_DEPTH
     assert all(features.shape == (3, 8) for features in outputs.hidden_states)
-    expected_layer_values = [15, 45, 91, 153, 231, 325]
+    expected_layer_values = [10, 36, 78, 136, 210, 300]
     for features, expected_value in zip(outputs.hidden_states, expected_layer_values):
         torch.testing.assert_close(features, torch.full_like(features, expected_value))
     torch.testing.assert_close(
