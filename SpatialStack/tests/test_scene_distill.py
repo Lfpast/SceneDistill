@@ -608,7 +608,10 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
     )
     text_model.rotary_emb = DummyRotaryEmbedding()
     text_model.norm = ScaleNorm()
-    text_model._update_linear_attn_mask = lambda attention_mask, cache_position: None
+    linear_attn_cache_args = []
+    text_model._update_linear_attn_mask = (
+        lambda attention_mask, past_key_values: linear_attn_cache_args.append(past_key_values)
+    )
     monkeypatch.setattr(modeling_qwen3_5, "create_causal_mask", lambda **kwargs: None)
 
     inputs_embeds = torch.zeros(1, 20, 8, requires_grad=True)
@@ -638,6 +641,8 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
         scene_distill_video_sizes=[1],
         return_scene_distill_post_features=True,
     )
+    assert linear_attn_cache_args[0] is baseline_cache
+    assert linear_attn_cache_args[1] is zero_gate_cache
     torch.testing.assert_close(zero_gate_outputs.last_hidden_state, baseline.last_hidden_state)
     assert len(zero_gate_cache) == len(baseline_cache) == 25
     for zero_gate_state, baseline_state in zip(zero_gate_cache, baseline_cache):
@@ -658,6 +663,7 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
         scene_distill_video_sizes=[1],
         return_scene_distill_post_features=True,
     )
+    assert linear_attn_cache_args[2] is None
 
     assert [layer_index for layer_index, _ in post_module.calls] == list(LLM_BLOCK_INDICES)
     expected_special_outputs = [15, 46, 93, 156, 235, 330]

@@ -130,7 +130,7 @@ return_mm_token_type_ids=True
 
 `do_sample_frames=False` 和 `do_resize=False` 的依据是采样已由现有 `process_video` 完成，空间 resize 已按 Qwen `smart_resize` 完成；CamDistill也采用“外部准备完成后禁止 processor 二次采样/resize”的契约，[qwen.py:367–375](/home/jackson/python/CamDistill/swift/template/templates/qwen.py:367)、[qwen.py:568–573](/home/jackson/python/CamDistill/swift/template/templates/qwen.py:568)。
 
-Transformers 5.3.0不能作为这条原生 video dataflow的运行边界。Qwen官方已经用单视频输入复现 `get_rope_index -> next(grid_iters[modality_type]) -> StopIteration`，并确认原因是该版本的原生 video MRoPE实现损坏，[Qwen3.5 issue #58](https://github.com/QwenLM/Qwen3.6/issues/58)；对应修复由 Transformers [PR #44474](https://github.com/huggingface/transformers/pull/44474) 合入并增加 video单元测试。仓库因此直接将原有依赖和训练/评估最低版本改为首个包含修复的正式版本 `transformers==5.4.0`，不在 SceneDistill模型中复制、monkey-patch或绕过第三方 `get_rope_index`。
+Transformers 5.3.0不能作为这条原生 video dataflow的运行边界。Qwen官方已经用单视频输入复现 `get_rope_index -> next(grid_iters[modality_type]) -> StopIteration`，并确认原因是该版本的原生 video MRoPE实现损坏，[Qwen3.5 issue #58](https://github.com/QwenLM/Qwen3.6/issues/58)；对应修复由 Transformers [PR #44474](https://github.com/huggingface/transformers/pull/44474) 合入并增加 video单元测试。仓库因此直接将原有依赖和训练/评估最低版本改为首个包含修复的正式版本 `transformers==5.4.0`，不在 SceneDistill模型中复制、monkey-patch或绕过第三方 `get_rope_index`。自定义 decoder forward也必须服从同一版本的 linear-attention mask契约：5.4.0的 `_update_linear_attn_mask` 第二个参数是 `past_key_values`，不能继续传入5.3.0使用的 `cache_position`，[modeling_qwen3_5.py:1247–1259](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py#L1247-L1259)。
 
 ### 2.4 空间预算
 
