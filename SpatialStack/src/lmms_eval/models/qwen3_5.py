@@ -21,7 +21,7 @@ from lmms_eval.api.registry import register_model
 from qwen_vl.data.utils import load_and_preprocess_video_frames
 
 
-MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.3.0")
+MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.4.0")
 
 
 def require_qwen3_5_support():

@@ -7,7 +7,7 @@ setup(
     packages=find_packages("src"),
     package_dir={"": "src"},
     install_requires=[
-        "transformers==5.3.0",
+        "transformers==5.4.0",
         "deepspeed==0.16.4",
         "flash_attn==2.8.3",
         "triton",

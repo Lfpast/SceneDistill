@@ -29,7 +29,7 @@ except ImportError as exc:
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DEFAULT_MODEL_PATH = "Journey9ni/SpatialStack-Qwen2.5-4B"
-MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.3.0")
+MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.4.0")
 QWEN3_5_MODEL_TYPES = {"qwen3_5", "qwen3_5_vl"}
 
 

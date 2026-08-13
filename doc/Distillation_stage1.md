@@ -140,7 +140,7 @@ student_features = concat(post_frame, post_global, dim=-1)
 get_image_features(..., return_dict=True, output_hidden_states=True)
 ```
 
-然后精确选择 `hidden_states[0]`、`[4]`、`[8]`、`[12]`。SceneDistill 已有调用和读取 `hidden_states` 的路径，[modeling_qwen3_5.py:641–684](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:641)；依赖版本固定为 Transformers 5.3.0，[setup.py:10](/home/jackson/python/SceneDistill/SpatialStack/setup.py:10)，其捕获机制以 [Transformers v5.3.0 官方 Qwen3.5 实现](https://github.com/huggingface/transformers/blob/v5.3.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py) 为准。
+然后精确选择 `hidden_states[0]`、`[4]`、`[8]`、`[12]`。SceneDistill 已有调用和读取 `hidden_states` 的路径，[modeling_qwen3_5.py:641–684](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:641)；依赖版本固定为 Transformers 5.4.0，[setup.py:10](/home/jackson/python/SceneDistill/SpatialStack/setup.py:10)，其捕获机制以 [Transformers v5.4.0 官方 Qwen3.5 实现](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py) 为准。
 
 具体约束：
 

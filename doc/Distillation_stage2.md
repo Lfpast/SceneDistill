@@ -98,7 +98,7 @@ llm_layer_features[m]:
 
 捕获点位于目标 decoder layer 执行之前。因此 zero-based `[4,8,12,16,20,24]` 精确表示 1-based 第 5、9、13、17、21、25 层的输入。当前自定义 LLM 循环在 [modeling_qwen3_5.py:366–398](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:366) 执行 decoder layer 和可选 fusion；Stage 2 在同一循环中仅捕获指定的六层输入，避免启用全部层的 `output_hidden_states`。
 
-依赖版本继续以仓库固定的 Transformers 5.3.0 为准，[setup.py:9–13](/home/jackson/python/SceneDistill/SpatialStack/setup.py:9)，并以 [Transformers v5.3.0 Qwen3.5 官方实现](https://github.com/huggingface/transformers/blob/v5.3.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py) 校准输出语义。
+依赖版本继续以仓库固定的 Transformers 5.4.0 为准，[setup.py:9–13](/home/jackson/python/SceneDistill/SpatialStack/setup.py:9)，并以 [Transformers v5.4.0 Qwen3.5 官方实现](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/models/qwen3_5/modeling_qwen3_5.py) 校准输出语义。
 
 ### 2.3 六组 post-LLM GCTE
 

@@ -87,7 +87,7 @@ pip install flash_attn==2.8.3 --no-build-isolation
 ### 4. Install Qwen3.5 dependencies
 
 ```bash
-pip install --upgrade transformers==5.3.0 accelerate==1.13.0 qwen_vl_utils==0.0.14 decord
+pip install --upgrade transformers==5.4.0 accelerate==1.13.0 qwen_vl_utils==0.0.14 decord
 pip install -U git+https://github.com/Dao-AILab/causal-conv1d --no-build-isolation
 pip install -U git+https://github.com/fla-org/flash-linear-attention
 ```

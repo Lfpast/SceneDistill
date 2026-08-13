@@ -14,7 +14,7 @@
 | 每视频 teacher 时间对齐 | [modeling_qwen3_5_scene_distill.py:201](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:201) 实现不变、严格 2:1 相邻平均、非 2:1 adaptive average pooling 和非法上采样报错四种情况 |
 | Student-only 原生 video 评估 | [qwen3_5.py:288](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:288)、[qwen3_5.py:310](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:310)、[qwen3_5.py:367](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:367)；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
 | 训练默认值直接覆盖 | [argument.py:33](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/argument.py:33) 与 [train.sh:43](/home/jackson/python/SceneDistill/SpatialStack/scripts/train/train.sh:43) 固定为 `16/8/1/262144/12544`；batch、context、LR 不机械翻倍 |
-| 依赖版本固定 | [setup.py:60](/home/jackson/python/SceneDistill/SpatialStack/setup.py:60) 固定 `qwen_vl_utils==0.0.14`，与当前 `transformers==5.3.0` 原生 video API 配套 |
+| 依赖版本固定 | [setup.py:10](/home/jackson/python/SceneDistill/SpatialStack/setup.py:10) 固定 `transformers==5.4.0`，[setup.py:60](/home/jackson/python/SceneDistill/SpatialStack/setup.py:60) 固定 `qwen_vl_utils==0.0.14`；Transformers 5.4.0是首个包含 Qwen3.5 video MRoPE `StopIteration` 官方修复的正式版本 |
 
 ## 1. 目标、问题与重写原则
 
@@ -90,7 +90,7 @@ frame_indices = uniform_sample(0, total_frames - 1, target_frames)
 - 帧目录和显式图片列表没有可靠的真实 FPS，使用 `sample_fps=1`。
 - SceneDistill采样代码不得主动 `repeat/duplicate` 帧；采样结果原样同时交给 Qwen和 VGGT。
 
-这里必须保留一个不能被文档回避的事实：Transformers 5.3.0 原生 Qwen3-VL video processor在 `T % temporal_patch_size != 0` 时，会在内部重复最后一帧后再做 temporal patchify，[video_processing_qwen3_vl.py:184–239](https://github.com/huggingface/transformers/blob/v5.3.0/src/transformers/models/qwen3_vl/video_processing_qwen3_vl.py#L184-L239)。这不是 SceneDistill新增的策略，而是采用“原生 Qwen video”必然继承的底层行为。若删除它，就必须 fork/改写官方 processor，反而不再是本方案定义的原生 dataflow。
+这里必须保留一个不能被文档回避的事实：Transformers 5.4.0 原生 Qwen3-VL video processor在 `T % temporal_patch_size != 0` 时，会在内部重复最后一帧后再做 temporal patchify，[video_processing_qwen3_vl.py:184–239](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/models/qwen3_vl/video_processing_qwen3_vl.py#L184-L239)。这不是 SceneDistill新增的策略，而是采用“原生 Qwen video”必然继承的底层行为。若删除它，就必须 fork/改写官方 processor，反而不再是本方案定义的原生 dataflow。
 
 因此奇数帧时两侧语义是：
 
@@ -129,6 +129,8 @@ return_mm_token_type_ids=True
 ```
 
 `do_sample_frames=False` 和 `do_resize=False` 的依据是采样已由现有 `process_video` 完成，空间 resize 已按 Qwen `smart_resize` 完成；CamDistill也采用“外部准备完成后禁止 processor 二次采样/resize”的契约，[qwen.py:367–375](/home/jackson/python/CamDistill/swift/template/templates/qwen.py:367)、[qwen.py:568–573](/home/jackson/python/CamDistill/swift/template/templates/qwen.py:568)。
+
+Transformers 5.3.0不能作为这条原生 video dataflow的运行边界。Qwen官方已经用单视频输入复现 `get_rope_index -> next(grid_iters[modality_type]) -> StopIteration`，并确认原因是该版本的原生 video MRoPE实现损坏，[Qwen3.5 issue #58](https://github.com/QwenLM/Qwen3.6/issues/58)；对应修复由 Transformers [PR #44474](https://github.com/huggingface/transformers/pull/44474) 合入并增加 video单元测试。仓库因此直接将原有依赖和训练/评估最低版本改为首个包含修复的正式版本 `transformers==5.4.0`，不在 SceneDistill模型中复制、monkey-patch或绕过第三方 `get_rope_index`。
 
 ### 2.4 空间预算
 
