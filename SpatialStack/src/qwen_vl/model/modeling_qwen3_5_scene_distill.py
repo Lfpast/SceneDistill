@@ -17,6 +17,7 @@ from .modeling_qwen3_5 import (
     Qwen3_5ModelWithGeometry,
     Qwen3_5PreTrainedModel,
     align_qwen3_5_geometry_modules,
+    remove_geometry_encoder_weights,
 )
 from .scene_distill_module import (
     LLM_BLOCK_INDICES,
@@ -26,7 +27,6 @@ from .scene_distill_module import (
     PRE_DISTILL_WEIGHT,
     SceneDistillPostModule,
     SceneDistillPreModule,
-    remove_teacher_weights,
     scene_distillation_loss,
     select_pre_vision_layer_outputs,
 )
@@ -480,7 +480,7 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         return align_qwen3_5_scene_distill_modules(model)
 
     def state_dict(self, *args, **kwargs):
-        return remove_teacher_weights(super().state_dict(*args, **kwargs))
+        return remove_geometry_encoder_weights(super().state_dict(*args, **kwargs))
 
     def forward(
         self,

@@ -6,6 +6,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers.cache_utils import Cache
 
 from .geometry_encoders import GeometryEncoderConfig, create_geometry_encoder
@@ -16,6 +17,7 @@ from .modeling_qwen3_5 import (
     Qwen3_5ModelWithGeometry,
     Qwen3_5PreTrainedModel,
     align_qwen3_5_geometry_modules,
+    remove_geometry_encoder_weights,
 )
 from .vggt_omega_direct_config import (
     get_vggt_omega_direct_num_extra_tokens,
@@ -23,7 +25,6 @@ from .vggt_omega_direct_config import (
     resolve_vggt_omega_direct_token_mode,
 )
 from .vggt_omega_direct_packing import (
-    build_direct_only_mask,
     compute_mrope_position_deltas,
     expand_image_embeds_with_direct_tokens,
     expand_visual_placeholders,
@@ -46,7 +47,6 @@ def align_qwen3_5_direct_modules(model):
         if direct_projector is not None and hasattr(direct_projector, "to"):
             direct_projector.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
 
-    model.direct_projector = getattr(inner_model, "direct_projector", None)
     return model
 
 
@@ -133,33 +133,60 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
     def _collect_direct_features(
         self,
         geometry_encoder_inputs: List[torch.Tensor],
+        video_grid_thw: torch.Tensor,
         target_device: torch.device,
         target_dtype: torch.dtype,
     ) -> torch.Tensor:
-        per_sample_features = []
-        for sample_inputs in geometry_encoder_inputs:
-            if sample_inputs.numel() == 0:
-                continue
-            features = self.geometry_encoder.encode(sample_inputs)
-            per_sample_features.append(features.to(device=target_device, dtype=target_dtype))
-        if not per_sample_features:
-            return torch.zeros(
-                0,
-                get_vggt_omega_direct_num_extra_tokens(
-                    getattr(self.config, "geometry_encoder_type", "vggt"),
-                    getattr(self.config, "geometry_direct_token_mode", None),
-                ),
-                self.geometry_encoder.get_feature_dim(),
-                device=target_device,
-                dtype=target_dtype,
+        if len(geometry_encoder_inputs) != video_grid_thw.shape[0]:
+            raise ValueError(
+                "VGGT-Omega direct video mismatch: "
+                f"geometry_inputs={len(geometry_encoder_inputs)}, video_grids={video_grid_thw.shape[0]}."
             )
+        per_sample_features = []
+        for video_index, (sample_inputs, grid) in enumerate(
+            zip(geometry_encoder_inputs, video_grid_thw.tolist())
+        ):
+            target_frames = int(grid[0])
+            features = self.geometry_encoder.encode(sample_inputs).to(
+                device=target_device,
+                dtype=torch.float32,
+            )
+            source_frames, num_tokens, feature_dim = features.shape
+            if source_frames == target_frames:
+                aligned = features
+            elif source_frames == 2 * target_frames:
+                aligned = features.reshape(
+                    target_frames,
+                    2,
+                    num_tokens,
+                    feature_dim,
+                ).mean(dim=1)
+            elif source_frames > target_frames:
+                channels = features.permute(1, 2, 0).reshape(
+                    1,
+                    num_tokens * feature_dim,
+                    source_frames,
+                )
+                aligned = F.adaptive_avg_pool1d(channels, target_frames).reshape(
+                    num_tokens,
+                    feature_dim,
+                    target_frames,
+                ).permute(2, 0, 1)
+            else:
+                raise ValueError(
+                    f"VGGT-Omega direct video {video_index} has only {source_frames} frames for "
+                    f"{target_frames} Qwen temporal groups; the two branches did not consume the same frames."
+                )
+            per_sample_features.append(aligned.to(dtype=target_dtype))
         return torch.cat(per_sample_features, dim=0)
 
     @staticmethod
-    def _per_frame_visual_sizes(image_grid_thw: torch.Tensor, spatial_merge_size: int) -> List[int]:
+    def _merged_frame_sizes(video_grid_thw: torch.Tensor, spatial_merge_size: int) -> List[int]:
         sizes = []
-        for t, h, w in image_grid_thw.tolist():
-            sizes.append((int(t) * int(h) * int(w)) // (spatial_merge_size ** 2))
+        for t, h, w in video_grid_thw.tolist():
+            sizes.extend(
+                [int(h) * int(w) // (spatial_merge_size ** 2)] * int(t)
+            )
         return sizes
 
     def forward(
@@ -178,10 +205,12 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
         **kwargs,
     ) -> Qwen3_5ModelOutputWithPast:
+        if self._is_direct_geometry() and (pixel_values is not None or image_grid_thw is not None):
+            raise ValueError("VGGT-Omega direct accepts visual inputs only through the native video fields.")
         direct_active = (
             self._is_direct_geometry()
-            and pixel_values is not None
-            and image_grid_thw is not None
+            and pixel_values_videos is not None
+            and video_grid_thw is not None
             and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
         )
         if not direct_active:
@@ -201,10 +230,6 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
                 **kwargs,
             )
 
-        if pixel_values_videos is not None:
-            raise NotImplementedError(
-                "VGGT-Omega direct injection only supports the multi-image path; native Qwen video inputs are unsupported."
-            )
         if input_ids is None:
             raise ValueError("VGGT-Omega direct injection requires input_ids so visual placeholders can be expanded.")
         if geometry_encoder_inputs is None:
@@ -218,33 +243,34 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
             self.initialize_geometry_modules()
         self.align_geometry_modules(inputs_embeds)
 
-        image_outputs = self.get_image_features(
-            pixel_values,
-            image_grid_thw,
+        video_outputs = self.get_video_features(
+            pixel_values_videos,
+            video_grid_thw,
             return_dict=True,
             output_hidden_states=False,
         )
-        pooler_output = image_outputs.pooler_output
+        pooler_output = video_outputs.pooler_output
         if isinstance(pooler_output, torch.Tensor):
-            image_embeds = pooler_output
+            video_embeds = pooler_output
         else:
-            image_embeds = torch.cat(list(pooler_output), dim=0)
-        image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+            video_embeds = torch.cat(list(pooler_output), dim=0)
+        video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
 
         direct_features = self._collect_direct_features(
             geometry_encoder_inputs,
+            video_grid_thw,
             target_device=inputs_embeds.device,
             target_dtype=inputs_embeds.dtype,
         )
         direct_embeds = self.direct_projector(direct_features)
         direct_tokens_per_frame = direct_embeds.shape[1]
         insert_position = self._direct_token_insert_position()
-        patches_per_frame = self._per_frame_visual_sizes(
-            image_grid_thw,
+        patches_per_frame = self._merged_frame_sizes(
+            video_grid_thw,
             spatial_merge_size=getattr(self.config.vision_config, "spatial_merge_size", 2),
         )
-        image_embeds_expanded = expand_image_embeds_with_direct_tokens(
-            image_embeds,
+        video_embeds_expanded = expand_image_embeds_with_direct_tokens(
+            video_embeds,
             direct_embeds,
             patches_per_frame,
             insert_position=insert_position,
@@ -253,7 +279,7 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
         if position_ids is None:
             position_ids = self.compute_3d_position_ids(
                 input_ids=input_ids,
-                image_grid_thw=image_grid_thw,
+                image_grid_thw=None,
                 video_grid_thw=video_grid_thw,
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
@@ -266,7 +292,7 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
             labels=None,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            placeholder_token_id=int(self.config.image_token_id),
+            placeholder_token_id=int(self.config.video_token_id),
             num_extra_per_frame=direct_tokens_per_frame,
             insert_position=insert_position,
         )
@@ -283,19 +309,12 @@ class Qwen3_5ModelWithVGGTOmegaDirect(Qwen3_5ModelWithGeometry):
                 device=cache_position.device,
                 dtype=cache_position.dtype,
             )
-        image_mask, _ = self.get_placeholder_mask(
+        _, video_mask = self.get_placeholder_mask(
             new_input_ids,
             inputs_embeds=expanded_inputs_embeds,
-            image_features=image_embeds_expanded,
+            video_features=video_embeds_expanded,
         )
-        expanded_inputs_embeds = expanded_inputs_embeds.masked_scatter(image_mask, image_embeds_expanded)
-
-        direct_only_mask = build_direct_only_mask(
-            image_mask[..., 0],
-            direct_tokens_per_frame,
-            insert_position=insert_position,
-        )
-        self._direct_only_mask = direct_only_mask
+        expanded_inputs_embeds = expanded_inputs_embeds.masked_scatter(video_mask, video_embeds_expanded)
         self.rope_deltas = compute_mrope_position_deltas(
             new_position_ids,
             new_input_ids,
@@ -323,7 +342,6 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect(Qwen3_5ForConditionalGe
         Qwen3_5PreTrainedModel.__init__(self, config)
         self.model = Qwen3_5ModelWithVGGTOmegaDirect(config)
         self.geometry_encoder = self.model.geometry_encoder
-        self.direct_projector = self.model.direct_projector
         self.language_feature_fusion = self.model.language_feature_fusion
         self.feature_fusion = self.model.feature_fusion
         self.geometry_merger = self.model.geometry_merger
@@ -335,6 +353,9 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect(Qwen3_5ForConditionalGe
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
         return align_qwen3_5_direct_modules(model)
+
+    def state_dict(self, *args, **kwargs):
+        return remove_geometry_encoder_weights(super().state_dict(*args, **kwargs))
 
     def forward(
         self,
@@ -357,8 +378,8 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect(Qwen3_5ForConditionalGe
     ) -> Qwen3_5CausalLMOutputWithPast:
         direct_active = (
             is_vggt_omega_direct_geometry_encoder(getattr(self.config, "geometry_encoder_type", "vggt"))
-            and pixel_values is not None
-            and image_grid_thw is not None
+            and pixel_values_videos is not None
+            and video_grid_thw is not None
             and (cache_position is None or (isinstance(cache_position, torch.Tensor) and cache_position[0] == 0))
         )
 
@@ -373,7 +394,7 @@ class Qwen3_5ForConditionalGenerationWithVGGTOmegaDirect(Qwen3_5ForConditionalGe
                 labels=labels,
                 attention_mask=None,
                 position_ids=None,
-                placeholder_token_id=int(self.config.image_token_id),
+                placeholder_token_id=int(self.config.video_token_id),
                 num_extra_per_frame=num_extra_per_frame,
                 insert_position=getattr(self.config, "geometry_token_insert_position", "front"),
             )

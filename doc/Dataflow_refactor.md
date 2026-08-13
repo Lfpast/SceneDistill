@@ -12,7 +12,8 @@
 | 多个独立视频 | [data_qwen.py:400](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:400) 按 placeholder 顺序生成视频列表；[data_qwen.py:527](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/data/data_qwen.py:527) 按同一顺序展平 grid 与 teacher 输入 |
 | 原生 temporal pooling 与 MRoPE | [modeling_qwen3_5_scene_distill.py:315](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:315) 调用 `get_video_features`；[modeling_qwen3_5_scene_distill.py:360](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:360) 调用 Qwen3.5 原生 `compute_3d_position_ids` |
 | 每视频 teacher 时间对齐 | [modeling_qwen3_5_scene_distill.py:201](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:201) 实现不变、严格 2:1 相邻平均、非 2:1 adaptive average pooling 和非法上采样报错四种情况 |
-| Student-only 原生 video 评估 | [qwen3_5.py:288](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:288)、[qwen3_5.py:310](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:310)、[qwen3_5.py:367](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:367)；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
+| SceneDistill student-only 原生 video 评估 | [qwen3_5.py:308](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:308) 统一构造原生 video；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
+| `vggt_omega_direct` 在线 VGGT 例外 | [qwen3_5.py:429](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:429) 仅为 direct checkpoint 从同一批 `sample_videos` 构造 VGGT 输入；[modeling_qwen3_5_vggt_omega_direct.py:206](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:206) 只接受原生 video字段 |
 | 训练默认值直接覆盖 | [argument.py:33](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/argument.py:33) 与 [train.sh:43](/home/jackson/python/SceneDistill/SpatialStack/scripts/train/train.sh:43) 固定为 `16/8/1/262144/12544`；batch、context、LR 不机械翻倍 |
 | 依赖版本固定 | [setup.py:10](/home/jackson/python/SceneDistill/SpatialStack/setup.py:10) 固定 `transformers==5.4.0`，[setup.py:60](/home/jackson/python/SceneDistill/SpatialStack/setup.py:60) 固定 `qwen_vl_utils==0.0.14`；Transformers 5.4.0是首个包含 Qwen3.5 video MRoPE `StopIteration` 官方修复的正式版本 |
 | SceneDistill checkpoint key ABI | Pre/Post由`model.language_model.scene_distill.{pre,post}`唯一持有；训练保存与评估加载共用精确 key契约，无 mapping、alias或 fallback |
@@ -257,10 +258,31 @@ VGGT-Omega 的17-token依据保持不变：aggregator按 `camera + 16 register +
 - `_sample_video_frames` 原位改成返回采样帧和匹配 metadata。
 - `_build_sample` 原位改成把单图、图片列表、单视频和多视频全部构造成 `type="video"` content，并返回按 placeholder排序的 video list。
 - `generate_until` 中把 `sample_images`、`images=...` 和 `videos=None` 全部改成 video字段；processor一次接收 batch内全部视频及其 metadata。
-- 删除 `build_qwen3_5_geometry_inputs(sample_images, image_grid_thw)`；evaluation是 student-only，不加载或调用 VGGT-Omega，[qwen3_5_scene_distill.py:38–49](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:38)。
-- 删除 `uses_geometry_encoder_for_eval` 及非 SceneDistill分支，不增加新的 adapter方法。
+- 删除 `build_qwen3_5_geometry_inputs(sample_images, image_grid_thw)`；SceneDistill evaluation是 student-only，不加载或调用 VGGT-Omega，[qwen3_5_scene_distill.py:38–49](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:38)。恢复的 `vggt_omega_direct`是下节明确限定的在线 VGGT例外。
+- 不恢复 `uses_geometry_encoder_for_eval`，也不增加新的 adapter方法；direct判定直接位于基础 `generate_until` 的现有输入准备位置。
 - 保留现有 `max_num_frames=32`，[qwen3_5.py:104–119](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:104)、[eval_qwen35_scene_distill.sh:7–11](/home/jackson/python/SceneDistill/SpatialStack/scripts/evaluation/eval_qwen35_scene_distill.sh:7)。
 - 删除会制造第二套多图语义的 `add_frame_index` 和旧 custom video loader配置；timestamp只来自原生 processor。
+
+### 3.6 `vggt_omega_direct`：外挂式恢复到同一条原生 video dataflow
+
+`vggt_omega_direct`不恢复旧多图入口，也不借用 SceneDistill的 GCTE、Pre/Post、distillation loss或 decoder injection。它与 SceneDistill共享数据层产生的同一批真实帧，但拥有独立的直接拼接语义：
+
+```text
+sample_videos
+  ├─ Qwen processor -> pixel_values_videos + video_grid_thw + native MRoPE
+  └─ build_geometry_video_inputs -> frozen external VGGT-Omega
+                                      -> camera / scene16 / special17
+                                      -> per-video temporal alignment
+                                      -> direct_projector
+                                      -> front/back concat per temporal group
+```
+
+- direct wrapper的首轮激活条件是`pixel_values_videos + video_grid_thw`；Qwen视觉特征来自`get_video_features`，placeholder与mask使用`video_token_id`，[modeling_qwen3_5_vggt_omega_direct.py:206](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:206)。旧`pixel_values + image_grid_thw`输入被拒绝，不再存在 native-video `NotImplementedError`。
+- 每个`[Tq,H,W]`拆成`Tq`个 merged visual spans；processor为各 temporal group生成的独立 placeholder run分别插入`K`个 token。`camera/scene16/special17`对应`K=1/16/17`；`front`为`[direct, Qwen visual]`，`back`为`[Qwen visual, direct]`。扩展 label保持`-100`，位置由原生 video MRoPE先生成，再按已有 packing规则锚定。
+- `_collect_direct_features`按视频逐个处理，[modeling_qwen3_5_vggt_omega_direct.py:133](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_vggt_omega_direct.py:133)：`S=Tq`保持，`S=2Tq`相邻两帧均值，其他`S>Tq`只沿时间轴做 float32 adaptive average pooling，`S<Tq`拒绝上采样。各视频先独立对齐，再按 placeholder顺序 concatenate，禁止跨视频 pooling。
+- evaluation复用基础`_build_sample`和 processor；仅当 checkpoint的`geometry_encoder_type == "vggt_omega_direct"`时，才将同一批已经采样、resize的`sample_videos`转成`geometry_encoder_inputs`并传给`generate`，[qwen3_5.py:429](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:429)。cached decode没有首轮 video tensors，因此不会重复执行 Qwen video encoder、VGGT或 projector。
+- VGGT-Omega始终由`geometry_encoder_path`在训练和评估进程外部加载。普通保存由 direct/SceneDistill模型的`state_dict`调用共用过滤函数，DeepSpeed保存由训练入口调用同一函数；只排除`geometry_encoder.*`和`model.geometry_encoder.*`，[modeling_qwen3_5.py:55](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:55)、[train_qwen.py:57](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/train_qwen.py:57)。`model.direct_projector.*`、`model.language_model.*`和`lm_head.*`保留；不增加 key mapping、完整性扫描或自定义 checkpoint错误处理。
+- 四个 direct train/eval脚本保持逐字不变。因此训练脚本默认`back`而对应评估脚本默认`front`的既有差异仍由调用者显式覆盖；默认输出路径差异同样继续通过现有`MODEL_PATH`覆盖。
 
 ## 4. 直接覆盖现有训练配置
 
@@ -345,7 +367,7 @@ rg -n "VIDEO_MAX_FRAMES|VIDEO_MIN_FRAMES|BASE_INTERVAL|VIDEO_MAX_FRAME_PIXELS|VI
 - 多视频样本的 placeholder、grid rows和 geometry tensors一一对应。
 - 严格2:1 teacher使用相邻两帧平均；非2:1 teacher使用 adaptive average pooling。
 - teacher、Pre和Post输出均为 `[sum(Tq_i),17,2048]`。
-- evaluation只运行 student，不构建 VGGT-Omega。
+- SceneDistill evaluation只运行 student，不构建 VGGT-Omega；`vggt_omega_direct` evaluation是明确例外，必须在线运行外部冻结 VGGT。
 - cached decode不重复执行 video encoder或 Post injection。
 
 ## 7. 最终验收标准
@@ -359,3 +381,4 @@ rg -n "VIDEO_MAX_FRAMES|VIDEO_MIN_FRAMES|BASE_INTERVAL|VIDEO_MAX_FRAME_PIXELS|VI
 5. 旧函数删除后只允许语义正确的一对一替换；函数总数不增加，也不增加兼容类、hook或配置开关。
 6. GCTE、Stage 3 injection、17-token顺序和 loss不变。
 7. 本地只报告实际完成的基础 smoke结果；Qwen3.5和 GPU runtime在目标环境验证前明确标为未验证。
+8. `vggt_omega_direct`是唯一恢复的在线 VGGT例外：train/eval均使用原生 video，checkpoint保留`direct_projector`且排除外挂 VGGT权重；四个 direct脚本保持逐字不变。

@@ -16,9 +16,11 @@ from qwen_vl.model.scene_distill_module import (
     GlobalSelfAttentionLayer,
     SceneDistillPostModule,
     SceneDistillPreModule,
-    remove_teacher_weights,
     scene_distillation_loss,
     select_pre_vision_layer_outputs,
+)
+from qwen_vl.model.vggt_omega_direct_config import (
+    get_vggt_omega_direct_num_extra_tokens,
 )
 from qwen_vl.model.vggt_omega_direct_packing import (
     expand_image_embeds_with_direct_tokens,
@@ -27,6 +29,13 @@ from qwen_vl.model.vggt_omega_direct_packing import (
 
 SCENE_DISTILL_PRE_STATE_PREFIX = "model.language_model.scene_distill.pre."
 SCENE_DISTILL_POST_STATE_PREFIX = "model.language_model.scene_distill.post."
+
+
+def _import_qwen35_module_or_skip(module_name):
+    try:
+        return __import__(module_name, fromlist=["*"])
+    except ImportError as error:
+        pytest.skip(f"Qwen3.5 Transformers runtime is unavailable: {error}")
 
 
 def test_special_token_initialization_uses_first_and_other_variants():
@@ -174,6 +183,146 @@ def test_special_tokens_are_prepended_per_frame():
     torch.testing.assert_close(expanded[-3:], image_embeds[-3:])
 
 
+def test_direct_tokens_are_appended_per_temporal_group():
+    video_embeds = torch.arange(15, dtype=torch.float32).reshape(5, 3)
+    direct_embeds = torch.stack(
+        [torch.full((2, 3), 100.0), torch.full((2, 3), 200.0)]
+    )
+
+    expanded = expand_image_embeds_with_direct_tokens(
+        video_embeds,
+        direct_embeds,
+        patches_per_frame=[2, 3],
+        insert_position="back",
+    )
+
+    torch.testing.assert_close(expanded[:2], video_embeds[:2])
+    torch.testing.assert_close(expanded[2:4], direct_embeds[0])
+    torch.testing.assert_close(expanded[4:7], video_embeds[2:])
+    torch.testing.assert_close(expanded[7:], direct_embeds[1])
+
+
+@pytest.mark.parametrize("insert_position", ["front", "back"])
+def test_placeholder_expansion_inserts_into_each_temporal_group(insert_position):
+    input_ids = torch.tensor([[1, 99, 99, 7, 99, 99, 99, 2]])
+    labels = input_ids.clone()
+    attention_mask = torch.ones_like(input_ids)
+    position_ids = torch.tensor([[1, 4, 4, 5, 8, 8, 8, 9]])
+
+    expanded_ids, expanded_labels, expanded_attention, expanded_positions = expand_visual_placeholders(
+        input_ids=input_ids,
+        labels=labels,
+        attention_mask=attention_mask,
+        position_ids=position_ids,
+        placeholder_token_id=99,
+        num_extra_per_frame=2,
+        insert_position=insert_position,
+    )
+
+    assert expanded_ids.shape[1] == input_ids.shape[1] + 4
+    assert torch.equal(expanded_attention, torch.ones_like(expanded_attention))
+    inserted = [1, 2, 6, 7] if insert_position == "front" else [3, 4, 9, 10]
+    assert torch.equal(expanded_labels[0, inserted], torch.full((4,), -100))
+    assert expanded_positions[0, inserted[:2]].tolist() == [4, 4]
+    assert expanded_positions[0, inserted[2:]].tolist() == [8, 8]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("camera", 1), ("scene16", 16), ("special17", 17)],
+)
+def test_direct_token_modes_have_expected_width(mode, expected):
+    assert get_vggt_omega_direct_num_extra_tokens("vggt_omega_direct", mode) == expected
+
+
+def test_direct_merged_frame_sizes_expand_each_video_temporal_group():
+    direct_module = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_vggt_omega_direct"
+    )
+
+    sizes = direct_module.Qwen3_5ModelWithVGGTOmegaDirect._merged_frame_sizes(
+        torch.tensor([[2, 4, 6], [1, 2, 2]]),
+        spatial_merge_size=2,
+    )
+
+    assert sizes == [6, 6, 1]
+
+
+def test_direct_temporal_alignment_keeps_video_boundaries():
+    direct_module = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_vggt_omega_direct"
+    )
+
+    class FakeEncoder:
+        def __init__(self, outputs):
+            self.outputs = iter(outputs)
+
+        def encode(self, _):
+            return next(self.outputs)
+
+    exact = torch.tensor([10.0, 20.0]).reshape(2, 1, 1)
+    paired = torch.tensor([0.0, 2.0, 4.0, 6.0]).reshape(4, 1, 1)
+    model = SimpleNamespace(geometry_encoder=FakeEncoder([exact, paired]))
+
+    aligned = direct_module.Qwen3_5ModelWithVGGTOmegaDirect._collect_direct_features(
+        model,
+        [torch.zeros(2, 3, 1, 1), torch.zeros(4, 3, 1, 1)],
+        torch.tensor([[2, 1, 1], [2, 1, 1]]),
+        target_device=torch.device("cpu"),
+        target_dtype=torch.float32,
+    )
+
+    torch.testing.assert_close(
+        aligned[:, 0, 0],
+        torch.tensor([10.0, 20.0, 1.0, 5.0]),
+    )
+
+
+def test_direct_temporal_alignment_uses_adaptive_pooling_for_non_two_to_one():
+    direct_module = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_vggt_omega_direct"
+    )
+
+    class FakeEncoder:
+        def encode(self, _):
+            return torch.arange(5, dtype=torch.float32).reshape(5, 1, 1)
+
+    model = SimpleNamespace(geometry_encoder=FakeEncoder())
+    aligned = direct_module.Qwen3_5ModelWithVGGTOmegaDirect._collect_direct_features(
+        model,
+        [torch.zeros(5, 3, 1, 1)],
+        torch.tensor([[2, 1, 1]]),
+        target_device=torch.device("cpu"),
+        target_dtype=torch.float32,
+    )
+    expected = torch.nn.functional.adaptive_avg_pool1d(
+        torch.arange(5, dtype=torch.float32).reshape(1, 1, 5),
+        2,
+    ).reshape(2)
+
+    torch.testing.assert_close(aligned[:, 0, 0], expected)
+
+
+def test_direct_temporal_alignment_rejects_upsampling():
+    direct_module = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5_vggt_omega_direct"
+    )
+
+    class FakeEncoder:
+        def encode(self, _):
+            return torch.zeros(2, 1, 1)
+
+    model = SimpleNamespace(geometry_encoder=FakeEncoder())
+    with pytest.raises(ValueError, match="only 2 frames for 3 Qwen temporal groups"):
+        direct_module.Qwen3_5ModelWithVGGTOmegaDirect._collect_direct_features(
+            model,
+            [torch.zeros(2, 3, 1, 1)],
+            torch.tensor([[3, 1, 1]]),
+            target_device=torch.device("cpu"),
+            target_dtype=torch.float32,
+        )
+
+
 def test_placeholder_expansion_masks_prepend_labels():
     input_ids = torch.tensor([[1, 99, 99, 2]])
     labels = input_ids.clone()
@@ -305,19 +454,24 @@ def test_scene_distill_checkpoint_loader_uses_exact_keys_only(tmp_path):
     )
 
 
-def test_checkpoint_filter_removes_teacher_but_keeps_student():
+def test_checkpoint_filter_removes_external_geometry_but_keeps_learned_modules():
+    modeling_qwen3_5 = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5"
+    )
     state_dict = {
         "model.geometry_encoder.vggt_omega.weight": torch.ones(1),
         "geometry_encoder.vggt_omega.weight": torch.ones(1),
+        "model.direct_projector.fc1.weight": torch.ones(1),
         f"{SCENE_DISTILL_PRE_STATE_PREFIX}camera": torch.ones(1),
         f"{SCENE_DISTILL_POST_STATE_PREFIX}frame.0.q_proj.weight": torch.ones(1),
         f"{SCENE_DISTILL_POST_STATE_PREFIX}inject.0.weight": torch.ones(1),
         "model.language_model.weight": torch.ones(1),
     }
 
-    filtered = remove_teacher_weights(state_dict)
+    filtered = modeling_qwen3_5.remove_geometry_encoder_weights(state_dict)
 
     assert set(filtered) == {
+        "model.direct_projector.fc1.weight",
         f"{SCENE_DISTILL_PRE_STATE_PREFIX}camera",
         f"{SCENE_DISTILL_POST_STATE_PREFIX}frame.0.q_proj.weight",
         f"{SCENE_DISTILL_POST_STATE_PREFIX}inject.0.weight",
@@ -613,13 +767,6 @@ def test_post_module_strict_load_rejects_missing_injection_weights():
     with pytest.raises(RuntimeError, match="Missing key"):
         target.load_state_dict(stage2_state_dict, strict=True)
     assert all(torch.count_nonzero(projection.weight) == 0 for projection in target.inject)
-
-
-def _import_qwen35_module_or_skip(module_name):
-    try:
-        return __import__(module_name, fromlist=["*"])
-    except ImportError as error:
-        pytest.skip(f"Qwen3.5 Transformers runtime is unavailable: {error}")
 
 
 def test_online_post_injection_uses_block_outputs_and_only_updates_special_tokens(monkeypatch):

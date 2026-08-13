@@ -59,11 +59,14 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
     if trainer.deepspeed:
         torch.cuda.synchronize()
-        if getattr(trainer.model.config, "geometry_encoder_type", None) == "scene_distill":
-            from qwen_vl.model.scene_distill_module import remove_teacher_weights
+        if getattr(trainer.model.config, "geometry_encoder_type", None) in {
+            "scene_distill",
+            "vggt_omega_direct",
+        }:
+            from qwen_vl.model.modeling_qwen3_5 import remove_geometry_encoder_weights
 
             state_dict = trainer.accelerator.get_state_dict(trainer.deepspeed)
-            state_dict = remove_teacher_weights(state_dict)
+            state_dict = remove_geometry_encoder_weights(state_dict)
             trainer._save(output_dir, state_dict=state_dict)
             return
         trainer.save_model(output_dir)

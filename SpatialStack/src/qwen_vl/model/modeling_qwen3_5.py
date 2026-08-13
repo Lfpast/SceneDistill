@@ -1,5 +1,6 @@
 import json
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -49,6 +50,18 @@ GEOMETRY_STATE_KEYWORDS = (
     "feature_fusion",
     "geometry_merger",
 )
+
+
+def remove_geometry_encoder_weights(state_dict):
+    """Remove externally loaded geometry-encoder weights from a checkpoint."""
+    filtered = OrderedDict(
+        (key, value)
+        for key, value in state_dict.items()
+        if not key.startswith("geometry_encoder.") and not key.startswith("model.geometry_encoder.")
+    )
+    if hasattr(state_dict, "_metadata"):
+        filtered._metadata = state_dict._metadata
+    return filtered
 
 
 def move_qwen3_5_geometry_modules_to_device(

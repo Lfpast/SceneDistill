@@ -18,7 +18,7 @@ from lmms_eval import utils
 from lmms_eval.api.instance import Instance
 from lmms_eval.api.model import lmms
 from lmms_eval.api.registry import register_model
-from qwen_vl.data.utils import load_and_preprocess_video_frames
+from qwen_vl.data.utils import build_geometry_video_inputs, load_and_preprocess_video_frames
 
 
 MIN_QWEN3_5_TRANSFORMERS_VERSION = Version("5.4.0")
@@ -422,9 +422,15 @@ class Qwen3_5(lmms):
             preprocess_elapsed = time.perf_counter() - batch_start
 
             if self.device_map == "auto":
-                inputs = move_qwen3_5_eval_inputs_to_device(inputs, "cuda")
+                input_device = "cuda"
             else:
-                inputs = move_qwen3_5_eval_inputs_to_device(inputs, self.device)
+                input_device = self.device
+            inputs = move_qwen3_5_eval_inputs_to_device(inputs, input_device)
+            if getattr(self._config, "geometry_encoder_type", None) == "vggt_omega_direct":
+                inputs["geometry_encoder_inputs"] = [
+                    build_geometry_video_inputs(video).to(input_device)
+                    for video in sample_videos
+                ]
 
             if "max_new_tokens" not in gen_kwargs:
                 gen_kwargs["max_new_tokens"] = 4096

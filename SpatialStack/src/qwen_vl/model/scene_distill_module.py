@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from typing import Sequence
 
 import torch
@@ -24,18 +23,6 @@ PRE_DISTILL_DEPTH = len(PRE_VISION_BLOCK_INDICES)
 POST_DISTILL_DEPTH = len(LLM_BLOCK_INDICES)
 PRE_DISTILL_WEIGHT = 0.05
 POST_DISTILL_WEIGHT = 0.05
-
-
-def remove_teacher_weights(state_dict):
-    """Remove the frozen online teacher from a SceneDistill checkpoint state dict."""
-    filtered = OrderedDict(
-        (key, value)
-        for key, value in state_dict.items()
-        if not key.startswith("geometry_encoder.") and not key.startswith("model.geometry_encoder.")
-    )
-    if hasattr(state_dict, "_metadata"):
-        filtered._metadata = state_dict._metadata
-    return filtered
 
 
 def select_pre_vision_layer_outputs(hidden_states: Sequence[torch.Tensor]) -> list[torch.Tensor]:
@@ -467,7 +454,6 @@ __all__ = [
     "SceneDistillPreModule",
     "SceneDistillPreProjector",
     "STREAM_DIM",
-    "remove_teacher_weights",
     "scene_distillation_loss",
     "select_pre_vision_layer_outputs",
 ]
