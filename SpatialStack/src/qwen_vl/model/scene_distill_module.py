@@ -214,14 +214,14 @@ class SceneDistillPreProjector(nn.Module):
     def __init__(self, input_dim: int, output_dim: int):
         super().__init__()
         self.norm = nn.LayerNorm(input_dim)
-        self.linear_fc1 = nn.Linear(input_dim, input_dim)
-        self.act_fn = nn.GELU()
-        self.linear_fc2 = nn.Linear(input_dim, output_dim)
+        self.fc1 = nn.Linear(input_dim, input_dim)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(input_dim, output_dim)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        features = features.to(self.linear_fc1.weight.dtype)
+        features = features.to(self.fc1.weight.dtype)
         features = self.norm(features)
-        return self.linear_fc2(self.act_fn(self.linear_fc1(features)))
+        return self.fc2(self.act(self.fc1(features)))
 
 
 class SceneDistillPreModule(nn.Module):
@@ -239,22 +239,25 @@ class SceneDistillPreModule(nn.Module):
         self.stream_dim = stream_dim
         self.feature_dim = 2 * stream_dim
 
-        self.pre_camera_token = nn.Parameter(torch.empty(1, 2, 1, stream_dim))
-        self.pre_scene_token = nn.Parameter(torch.empty(1, 2, NUM_SCENE_TOKENS, stream_dim))
-        self.pre_frame_layers = nn.ModuleList(
+        self.camera = nn.Parameter(torch.empty(1, 2, 1, stream_dim))
+        self.scene = nn.Parameter(torch.empty(1, 2, NUM_SCENE_TOKENS, stream_dim))
+        self.frame = nn.ModuleList(
             FrameCrossAttentionLayer(stream_dim, visual_dim, num_heads)
             for _ in range(PRE_DISTILL_DEPTH)
         )
-        self.pre_global_layers = nn.ModuleList(
-            GlobalSelfAttentionLayer(stream_dim, num_heads)
-            for _ in range(PRE_DISTILL_DEPTH)
+        self.add_module(
+            "global",
+            nn.ModuleList(
+                GlobalSelfAttentionLayer(stream_dim, num_heads)
+                for _ in range(PRE_DISTILL_DEPTH)
+            ),
         )
-        self.pre_projector = SceneDistillPreProjector(self.feature_dim, text_hidden_dim)
+        self.projector = SceneDistillPreProjector(self.feature_dim, text_hidden_dim)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        nn.init.normal_(self.pre_camera_token, std=1e-3)
-        nn.init.normal_(self.pre_scene_token, std=1e-3)
+        nn.init.normal_(self.camera, std=1e-3)
+        nn.init.normal_(self.scene, std=1e-3)
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
@@ -266,8 +269,8 @@ class SceneDistillPreModule(nn.Module):
         if not video_sizes or any(size <= 0 for size in video_sizes):
             raise ValueError(f"video_sizes must contain positive frame counts, got {video_sizes}.")
 
-        first_variant = torch.cat([self.pre_camera_token[:, 0], self.pre_scene_token[:, 0]], dim=1)
-        other_variant = torch.cat([self.pre_camera_token[:, 1], self.pre_scene_token[:, 1]], dim=1)
+        first_variant = torch.cat([self.camera[:, 0], self.scene[:, 0]], dim=1)
+        other_variant = torch.cat([self.camera[:, 1], self.scene[:, 1]], dim=1)
         per_video_tokens = []
         for video_size in video_sizes:
             per_video_tokens.append(first_variant)
@@ -292,23 +295,23 @@ class SceneDistillPreModule(nn.Module):
             )
 
         special_tokens = self.prepare_pre_special_tokens(video_sizes)
-        target_device = self.pre_camera_token.device
-        target_dtype = self.pre_camera_token.dtype
+        target_device = self.camera.device
+        target_dtype = self.camera.dtype
         special_tokens = special_tokens.to(device=target_device, dtype=target_dtype)
 
         special_after_frame = None
         for layer_index, visual_features in enumerate(visual_layer_outputs):
             visual_features = visual_features.detach().to(device=target_device, dtype=target_dtype)
-            special_tokens = self.pre_frame_layers[layer_index](special_tokens, visual_features, frame_sizes)
+            special_tokens = self.frame[layer_index](special_tokens, visual_features, frame_sizes)
             if layer_index == PRE_DISTILL_DEPTH - 1:
                 special_after_frame = special_tokens
-            special_tokens = self.pre_global_layers[layer_index](special_tokens, video_sizes)
+            special_tokens = self.get_submodule("global")[layer_index](special_tokens, video_sizes)
 
         pre_features = torch.cat([special_after_frame, special_tokens], dim=-1)
         expected_shape = (sum(int(size) for size in video_sizes), NUM_SPECIAL_TOKENS, self.feature_dim)
         if pre_features.shape != expected_shape:
             raise ValueError(f"SceneDistill Pre features must have shape {expected_shape}, got {pre_features.shape}.")
-        pre_embeds = self.pre_projector(pre_features)
+        pre_embeds = self.projector(pre_features)
         return pre_embeds, pre_features, special_tokens
 
 
@@ -332,15 +335,18 @@ class SceneDistillPostModule(nn.Module):
         self.special_dim = int(special_dim)
         self.feature_dim = 2 * self.special_dim
         self.layer_indices = LLM_BLOCK_INDICES
-        self.post_frame_layers = nn.ModuleList(
+        self.frame = nn.ModuleList(
             FrameCrossAttentionLayer(self.special_dim, self.llm_hidden_dim, num_heads)
             for _ in range(POST_DISTILL_DEPTH)
         )
-        self.post_global_layers = nn.ModuleList(
-            GlobalSelfAttentionLayer(self.special_dim, num_heads)
-            for _ in range(POST_DISTILL_DEPTH)
+        self.add_module(
+            "global",
+            nn.ModuleList(
+                GlobalSelfAttentionLayer(self.special_dim, num_heads)
+                for _ in range(POST_DISTILL_DEPTH)
+            ),
         )
-        self.post_injection_projections = nn.ModuleList(
+        self.inject = nn.ModuleList(
             nn.Linear(self.special_dim, self.llm_hidden_dim, bias=False)
             for _ in range(POST_DISTILL_DEPTH)
         )
@@ -352,7 +358,7 @@ class SceneDistillPostModule(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
-        for projection in self.post_injection_projections:
+        for projection in self.inject:
             nn.init.zeros_(projection.weight)
 
     def forward(
@@ -397,13 +403,13 @@ class SceneDistillPostModule(nn.Module):
             dtype=reference_parameter.dtype,
         )
         llm_layer_features = llm_layer_features.to(device=post_tokens.device, dtype=post_tokens.dtype)
-        post_after_frame = self.post_frame_layers[stage_index](
+        post_after_frame = self.frame[stage_index](
             post_tokens,
             llm_layer_features,
             frame_sizes,
         )
-        post_after_global = self.post_global_layers[stage_index](post_after_frame, video_sizes)
-        injection_delta = self.post_injection_projections[stage_index](post_after_global)
+        post_after_global = self.get_submodule("global")[stage_index](post_after_frame, video_sizes)
+        injection_delta = self.inject[stage_index](post_after_global)
 
         expected_special_shape = (num_frames, NUM_SPECIAL_TOKENS, self.special_dim)
         expected_injection_shape = (num_frames, NUM_SPECIAL_TOKENS, self.llm_hidden_dim)

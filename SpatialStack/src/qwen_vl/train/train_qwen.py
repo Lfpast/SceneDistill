@@ -64,13 +64,6 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
             state_dict = trainer.accelerator.get_state_dict(trainer.deepspeed)
             state_dict = remove_teacher_weights(state_dict)
-            has_pre = any("scene_distill_pre_module." in key for key in state_dict)
-            has_post = any("scene_distill_post_module." in key for key in state_dict)
-            if not has_pre or not has_post:
-                raise RuntimeError(
-                    "Refusing to save an incomplete SceneDistill checkpoint: both Pre and Post weights "
-                    "must be present in the gathered distributed state dict."
-                )
             trainer._save(output_dir, state_dict=state_dict)
             return
         trainer.save_model(output_dir)
@@ -129,17 +122,9 @@ def set_model(model_args, model):
             p.requires_grad = False
 
         if model_args.geometry_encoder_type == "scene_distill":
-            inner_model = getattr(model, "model", None)
-            scene_distill_pre_module = getattr(inner_model, "scene_distill_pre_module", None)
-            language_model = getattr(inner_model, "language_model", None)
-            scene_distill_post_module = getattr(language_model, "scene_distill_post_module", None)
-            if scene_distill_pre_module is None or scene_distill_post_module is None:
-                raise RuntimeError(
-                    "SceneDistill model did not initialize both pre and post modules."
-                )
-            for module in (scene_distill_pre_module, scene_distill_post_module):
-                for parameter in module.parameters():
-                    parameter.requires_grad = True
+            scene_distill = model.model.language_model.scene_distill
+            for parameter in scene_distill.parameters():
+                parameter.requires_grad = True
             if any(parameter.requires_grad for parameter in model.geometry_encoder.parameters()):
                 raise RuntimeError("SceneDistill requires every VGGT-Omega teacher parameter to stay frozen.")
 
@@ -361,16 +346,15 @@ def train(attn_implementation="flash_attention_2"):
         visual_module.print_trainable_parameters()
         language_module.print_trainable_parameters()
         if model_args.geometry_encoder_type == "scene_distill":
-            scene_distill_pre_module = model.model.scene_distill_pre_module
-            scene_distill_post_module = model.model.language_model.scene_distill_post_module
+            scene_distill = model.model.language_model.scene_distill
             trainable_pre = sum(
                 parameter.numel()
-                for parameter in scene_distill_pre_module.parameters()
+                for parameter in scene_distill["pre"].parameters()
                 if parameter.requires_grad
             )
             trainable_post = sum(
                 parameter.numel()
-                for parameter in scene_distill_post_module.parameters()
+                for parameter in scene_distill["post"].parameters()
                 if parameter.requires_grad
             )
             trainable_teacher = sum(

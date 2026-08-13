@@ -25,14 +25,17 @@ from qwen_vl.model.vggt_omega_direct_packing import (
     expand_visual_placeholders,
 )
 
+SCENE_DISTILL_PRE_STATE_PREFIX = "model.language_model.scene_distill.pre."
+SCENE_DISTILL_POST_STATE_PREFIX = "model.language_model.scene_distill.post."
+
 
 def test_special_token_initialization_uses_first_and_other_variants():
     module = SceneDistillPreModule(visual_dim=6, text_hidden_dim=10, stream_dim=8, num_heads=2)
     with torch.no_grad():
-        module.pre_camera_token[:, 0].fill_(1.0)
-        module.pre_camera_token[:, 1].fill_(2.0)
-        module.pre_scene_token[:, 0].fill_(3.0)
-        module.pre_scene_token[:, 1].fill_(4.0)
+        module.camera[:, 0].fill_(1.0)
+        module.camera[:, 1].fill_(2.0)
+        module.scene[:, 0].fill_(3.0)
+        module.scene[:, 1].fill_(4.0)
 
     tokens = module.prepare_pre_special_tokens([2, 3])
 
@@ -101,9 +104,9 @@ def test_gcte_detaches_vision_and_trains_student_parameters():
     embeds, features, _ = module(visual_layers, frame_sizes=[2, 2], video_sizes=[2])
     (embeds.sum() + features.sum()).backward()
 
-    assert module.pre_camera_token.grad is not None
-    assert module.pre_scene_token.grad is not None
-    assert module.pre_projector.linear_fc2.weight.grad is not None
+    assert module.camera.grad is not None
+    assert module.scene.grad is not None
+    assert module.projector.fc2.weight.grad is not None
     assert all(visual_features.grad is None for visual_features in visual_layers)
 
 
@@ -233,33 +236,37 @@ def test_scene_distill_pre_module_state_dict_round_trip():
 def test_scene_distill_checkpoint_ownership_matches_decoder_execution():
     root = nn.Module()
     root.model = nn.Module()
-    root.model.scene_distill_pre_module = SceneDistillPreModule(
-        visual_dim=6,
-        text_hidden_dim=10,
-        stream_dim=8,
-        num_heads=2,
-    )
     root.model.language_model = nn.Module()
-    root.model.language_model.scene_distill_post_module = SceneDistillPostModule(
-        llm_hidden_dim=10,
-        special_dim=8,
-        num_heads=2,
+    root.model.language_model.scene_distill = nn.ModuleDict(
+        {
+            "pre": SceneDistillPreModule(
+                visual_dim=6,
+                text_hidden_dim=10,
+                stream_dim=8,
+                num_heads=2,
+            ),
+            "post": SceneDistillPostModule(
+                llm_hidden_dim=10,
+                special_dim=8,
+                num_heads=2,
+            ),
+        }
     )
 
     keys = set(root.state_dict())
-    pre_keys = {key for key in keys if "scene_distill_pre_module" in key}
-    post_keys = {key for key in keys if "scene_distill_post_module" in key}
+    pre_keys = {key for key in keys if key.startswith(SCENE_DISTILL_PRE_STATE_PREFIX)}
+    post_keys = {key for key in keys if key.startswith(SCENE_DISTILL_POST_STATE_PREFIX)}
 
     assert len(pre_keys) == 176
     assert len(post_keys) == 258
-    assert all(key.startswith("model.scene_distill_pre_module.") for key in pre_keys)
-    assert all(
-        key.startswith("model.language_model.scene_distill_post_module.")
-        for key in post_keys
-    )
+    assert pre_keys | post_keys == {key for key in keys if "scene_distill" in key}
+    assert f"{SCENE_DISTILL_PRE_STATE_PREFIX}camera" in pre_keys
+    assert f"{SCENE_DISTILL_PRE_STATE_PREFIX}projector.fc1.weight" in pre_keys
+    assert f"{SCENE_DISTILL_POST_STATE_PREFIX}inject.0.weight" in post_keys
+    assert not any("_module" in key or "pre_" in key or "post_" in key for key in keys)
 
 
-def test_scene_distill_checkpoint_loader_normalizes_runtime_ownership(tmp_path):
+def test_scene_distill_checkpoint_loader_uses_exact_keys_only(tmp_path):
     modeling_qwen3_5 = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5"
     )
@@ -267,16 +274,20 @@ def test_scene_distill_checkpoint_loader_normalizes_runtime_ownership(tmp_path):
 
     model = nn.Module()
     model.model = nn.Module()
-    model.model.scene_distill_pre_module = nn.Linear(2, 2, bias=False)
     model.model.language_model = nn.Module()
-    model.model.language_model.scene_distill_post_module = nn.Linear(2, 2, bias=False)
+    model.model.language_model.scene_distill = nn.ModuleDict(
+        {
+            "pre": nn.Linear(2, 2, bias=False),
+            "post": nn.Linear(2, 2, bias=False),
+        }
+    )
 
     pre_weight = torch.full((2, 2), 3.0)
     post_weight = torch.full((2, 2), 5.0)
     save_file(
         {
-            "model.visual.scene_distill_pre_module.weight": pre_weight,
-            "model.scene_distill_post_module.weight": post_weight,
+            f"{SCENE_DISTILL_PRE_STATE_PREFIX}weight": pre_weight,
+            f"{SCENE_DISTILL_POST_STATE_PREFIX}weight": post_weight,
         },
         tmp_path / "model.safetensors",
     )
@@ -284,12 +295,12 @@ def test_scene_distill_checkpoint_loader_normalizes_runtime_ownership(tmp_path):
     loaded_keys = modeling_qwen3_5._load_qwen3_5_geometry_submodules(model, tmp_path)
 
     assert loaded_keys == {
-        "model.scene_distill_pre_module.weight",
-        "model.language_model.scene_distill_post_module.weight",
+        f"{SCENE_DISTILL_PRE_STATE_PREFIX}weight",
+        f"{SCENE_DISTILL_POST_STATE_PREFIX}weight",
     }
-    torch.testing.assert_close(model.model.scene_distill_pre_module.weight, pre_weight)
+    torch.testing.assert_close(model.model.language_model.scene_distill["pre"].weight, pre_weight)
     torch.testing.assert_close(
-        model.model.language_model.scene_distill_post_module.weight,
+        model.model.language_model.scene_distill["post"].weight,
         post_weight,
     )
 
@@ -298,18 +309,18 @@ def test_checkpoint_filter_removes_teacher_but_keeps_student():
     state_dict = {
         "model.geometry_encoder.vggt_omega.weight": torch.ones(1),
         "geometry_encoder.vggt_omega.weight": torch.ones(1),
-        "model.scene_distill_pre_module.pre_camera_token": torch.ones(1),
-        "model.language_model.scene_distill_post_module.post_frame_layers.0.q_proj.weight": torch.ones(1),
-        "model.language_model.scene_distill_post_module.post_injection_projections.0.weight": torch.ones(1),
+        f"{SCENE_DISTILL_PRE_STATE_PREFIX}camera": torch.ones(1),
+        f"{SCENE_DISTILL_POST_STATE_PREFIX}frame.0.q_proj.weight": torch.ones(1),
+        f"{SCENE_DISTILL_POST_STATE_PREFIX}inject.0.weight": torch.ones(1),
         "model.language_model.weight": torch.ones(1),
     }
 
     filtered = remove_teacher_weights(state_dict)
 
     assert set(filtered) == {
-        "model.scene_distill_pre_module.pre_camera_token",
-        "model.language_model.scene_distill_post_module.post_frame_layers.0.q_proj.weight",
-        "model.language_model.scene_distill_post_module.post_injection_projections.0.weight",
+        f"{SCENE_DISTILL_PRE_STATE_PREFIX}camera",
+        f"{SCENE_DISTILL_POST_STATE_PREFIX}frame.0.q_proj.weight",
+        f"{SCENE_DISTILL_POST_STATE_PREFIX}inject.0.weight",
         "model.language_model.weight",
     }
 
@@ -351,8 +362,8 @@ def test_post_module_shapes_and_gradients():
     post_features.square().mean().backward()
     assert pre_global_tokens.grad is not None
     assert all(features.grad is not None for features in llm_layer_features)
-    assert module.post_frame_layers[0].q_proj.weight.grad is not None
-    assert module.post_global_layers[-1].qkv.weight.grad is not None
+    assert module.frame[0].q_proj.weight.grad is not None
+    assert module.get_submodule("global")[-1].qkv.weight.grad is not None
 
 
 def test_zero_gate_receives_sft_gradient_and_opens_post_gradient_path():
@@ -364,18 +375,18 @@ def test_zero_gate_receives_sft_gradient_and_opens_post_gradient_path():
     injection_delta = module(0, post_tokens, llm_features, [18], [1])[2]
     injection_delta.sum().backward()
 
-    assert module.post_injection_projections[0].weight.grad.abs().sum() > 0
-    assert module.post_frame_layers[0].q_proj.weight.grad.abs().sum() == 0
+    assert module.inject[0].weight.grad.abs().sum() > 0
+    assert module.frame[0].q_proj.weight.grad.abs().sum() == 0
     assert post_tokens.grad.abs().sum() == 0
 
     module.zero_grad(set_to_none=True)
     post_tokens.grad = None
     llm_features.grad = None
     with torch.no_grad():
-        module.post_injection_projections[0].weight.fill_(0.1)
+        module.inject[0].weight.fill_(0.1)
     module(0, post_tokens, llm_features, [18], [1])[2].sum().backward()
 
-    assert module.post_frame_layers[0].q_proj.weight.grad.abs().sum() > 0
+    assert module.frame[0].q_proj.weight.grad.abs().sum() > 0
     assert post_tokens.grad.abs().sum() > 0
 
 
@@ -464,39 +475,40 @@ def test_pre_and_post_modules_use_public_attention_classes_with_disjoint_paramet
     assert {id(parameter) for parameter in pre_module.parameters()}.isdisjoint(
         {id(parameter) for parameter in post_module.parameters()}
     )
-    assert len({id(layer) for layer in post_module.post_frame_layers}) == POST_DISTILL_DEPTH
-    assert len({id(layer) for layer in post_module.post_global_layers}) == POST_DISTILL_DEPTH
+    assert len({id(layer) for layer in post_module.frame}) == POST_DISTILL_DEPTH
+    assert len({id(layer) for layer in post_module.get_submodule("global")}) == POST_DISTILL_DEPTH
     assert all(
         isinstance(layer, FrameCrossAttentionLayer)
-        for layer in post_module.post_frame_layers
+        for layer in post_module.frame
     )
-    assert all(isinstance(layer, GlobalSelfAttentionLayer) for layer in pre_module.pre_global_layers)
-    assert all(isinstance(layer, GlobalSelfAttentionLayer) for layer in post_module.post_global_layers)
+    assert all(
+        isinstance(layer, GlobalSelfAttentionLayer)
+        for layer in pre_module.get_submodule("global")
+    )
+    assert all(
+        isinstance(layer, GlobalSelfAttentionLayer)
+        for layer in post_module.get_submodule("global")
+    )
     assert not any(
         component in name
         for name, _ in post_module.named_parameters()
         for component in ("camera_token", "scene_token", "projector")
     )
-    assert len({id(projection.weight) for projection in post_module.post_injection_projections}) == POST_DISTILL_DEPTH
-    assert all(projection.bias is None for projection in post_module.post_injection_projections)
-    assert all(projection.weight.shape == (10, 8) for projection in post_module.post_injection_projections)
-    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.post_injection_projections)
+    assert len({id(projection.weight) for projection in post_module.inject}) == POST_DISTILL_DEPTH
+    assert all(projection.bias is None for projection in post_module.inject)
+    assert all(projection.weight.shape == (10, 8) for projection in post_module.inject)
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.inject)
     with torch.no_grad():
-        post_module.post_injection_projections[0].weight.fill_(1)
+        post_module.inject[0].weight.fill_(1)
     post_module.reset_parameters()
-    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.post_injection_projections)
-    assert all(
-        key.startswith(
-            (
-                "pre_camera_token",
-                "pre_scene_token",
-                "pre_frame_layers",
-                "pre_global_layers",
-                "pre_projector",
-            )
-        )
-        for key in pre_module.state_dict()
-    )
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in post_module.inject)
+    assert {key.split(".", 1)[0] for key in pre_module.state_dict()} == {
+        "camera",
+        "scene",
+        "frame",
+        "global",
+        "projector",
+    }
 
 
 def test_post_module_rejects_invalid_stage_and_shapes():
@@ -580,32 +592,27 @@ def test_scene_distill_post_module_state_dict_round_trip():
         num_heads=2,
     )
     with torch.no_grad():
-        for index, projection in enumerate(source.post_injection_projections, start=1):
+        for index, projection in enumerate(source.inject, start=1):
             projection.weight.fill_(index)
 
     target.load_state_dict(source.state_dict(), strict=True)
 
     for source_parameter, target_parameter in zip(source.parameters(), target.parameters()):
         torch.testing.assert_close(source_parameter, target_parameter)
-    assert all(torch.count_nonzero(projection.weight) > 0 for projection in target.post_injection_projections)
+    assert all(torch.count_nonzero(projection.weight) > 0 for projection in target.inject)
 
 
-def test_stage2_checkpoint_keeps_missing_injection_projections_zero():
+def test_post_module_strict_load_rejects_missing_injection_weights():
     source = SceneDistillPostModule(llm_hidden_dim=6, special_dim=8, num_heads=2)
     stage2_state_dict = {
         key: value
         for key, value in source.state_dict().items()
-        if not key.startswith("post_injection_projections")
+        if not key.startswith("inject")
     }
     target = SceneDistillPostModule(llm_hidden_dim=6, special_dim=8, num_heads=2)
-    incompatible = target.load_state_dict(stage2_state_dict, strict=False)
-
-    assert incompatible.unexpected_keys == []
-    assert incompatible.missing_keys == [
-        f"post_injection_projections.{index}.weight"
-        for index in range(POST_DISTILL_DEPTH)
-    ]
-    assert all(torch.count_nonzero(projection.weight) == 0 for projection in target.post_injection_projections)
+    with pytest.raises(RuntimeError, match="Missing key"):
+        target.load_state_dict(stage2_state_dict, strict=True)
+    assert all(torch.count_nonzero(projection.weight) == 0 for projection in target.inject)
 
 
 def _import_qwen35_module_or_skip(module_name):
@@ -619,9 +626,7 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
     modeling_qwen3_5 = _import_qwen35_module_or_skip(
         "qwen_vl.model.modeling_qwen3_5"
     )
-    assert "scene_distill_pre_module" in modeling_qwen3_5.GEOMETRY_STATE_KEYWORDS
-    assert "scene_distill_post_module" in modeling_qwen3_5.GEOMETRY_STATE_KEYWORDS
-    assert "scene_distill_module" not in modeling_qwen3_5.GEOMETRY_STATE_KEYWORDS
+    assert "scene_distill" in modeling_qwen3_5.GEOMETRY_STATE_KEYWORDS
 
     class DummyDecoderLayer(nn.Module):
         layer_type = "full_attention"
@@ -691,7 +696,7 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
         past_key_values=baseline_cache,
         cache_position=torch.arange(20),
     )
-    text_model.scene_distill_post_module = post_module
+    text_model.scene_distill = nn.ModuleDict({"post": post_module})
     zero_gate_cache = []
     zero_gate_outputs = text_model(
         inputs_embeds=inputs_embeds,
@@ -799,8 +804,8 @@ def test_online_post_injection_survives_gradient_checkpointing():
         num_heads=2,
     )
     with torch.no_grad():
-        post_module.post_injection_projections[0].weight.fill_(0.1)
-    model.scene_distill_post_module = post_module
+        post_module.inject[0].weight.fill_(0.1)
+    model.scene_distill = nn.ModuleDict({"post": post_module})
 
     outputs = model(
         input_ids=input_ids,
@@ -930,17 +935,14 @@ def test_scene_distill_teacher_is_constructed_only_with_a_training_path(monkeypa
             text_config=SimpleNamespace(hidden_size=8, num_hidden_layers=25),
         )
         model.geometry_encoder = None
-        model.scene_distill_pre_module = None
         model.language_model = nn.Module()
-        model.language_model.scene_distill_post_module = None
         model._geometry_modules_initialized = False
         return model
 
     eval_model = make_model(None)
     eval_model.initialize_geometry_modules()
     assert eval_model.geometry_encoder is None
-    assert eval_model.scene_distill_pre_module is not None
-    assert eval_model.language_model.scene_distill_post_module is not None
+    assert set(eval_model.language_model.scene_distill) == {"pre", "post"}
     assert teacher_paths == []
     with pytest.raises(RuntimeError, match="training requires a VGGT-Omega teacher"):
         eval_model._collect_teacher_features([torch.zeros(1)], torch.device("cpu"))
@@ -1051,9 +1053,14 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
             self.layer_indices = LLM_BLOCK_INDICES
 
     class FakeLanguageModel(nn.Module):
-        def __init__(self, post_module):
+        def __init__(self, pre_module, post_module):
             super().__init__()
-            self.scene_distill_post_module = post_module
+            self.scene_distill = nn.ModuleDict(
+                {
+                    "pre": pre_module,
+                    "post": post_module,
+                }
+            )
             self.post_requests = []
 
         def forward(
@@ -1062,7 +1069,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
             return_scene_distill_post_features=False,
             **kwargs,
         ):
-            self.post_requests.append(self.scene_distill_post_module)
+            self.post_requests.append(self.scene_distill["post"])
             return output_type(
                 last_hidden_state=inputs_embeds,
                 hidden_states=(teacher_features[..., :1024], teacher_features[..., 1024:])
@@ -1077,8 +1084,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         vision_config=SimpleNamespace(spatial_merge_size=2),
     )
     model.geometry_encoder = nn.Identity()
-    model.scene_distill_pre_module = FakePreModule()
-    model.language_model = FakeLanguageModel(FakePostModule())
+    model.language_model = FakeLanguageModel(FakePreModule(), FakePostModule())
     model._last_pre_distill_loss = None
     model._last_post_distill_loss = None
     model._direct_only_mask = None
@@ -1118,7 +1124,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill["post"]
     assert model._last_pre_distill_loss is not None
     assert model._last_post_distill_loss is not None
     assert outputs.hidden_states is None
@@ -1130,7 +1136,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill["post"]
 
     teacher_calls["count"] = 0
     model(
@@ -1139,7 +1145,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill["post"]
 
     teacher_calls["count"] = 0
     model.geometry_encoder = None
@@ -1149,7 +1155,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 0
-    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill["post"]
 
     calls_before_decode = len(model.language_model.post_requests)
     model(

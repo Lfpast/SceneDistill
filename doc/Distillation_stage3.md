@@ -112,8 +112,8 @@ $$
 
 扩展现有 `SceneDistillPostModule`，不新增类：
 
-- 新增 `post_injection_projections`，包含 6 个独立的 `nn.Linear(1024, D_l, bias=False)`，顺序严格对应 `(4,8,12,16,20,24)`。
-- 保留 `post_frame_layers`、`post_global_layers` 和全部 Stage 2 attention 参数。
+- `post.inject`包含 6 个独立的 `nn.Linear(1024, D_l, bias=False)`，顺序严格对应 `(4,8,12,16,20,24)`。
+- `post.frame`、`post.global`保留全部既有 attention 参数与计算。
 - 调整初始化顺序：现有 attention/projector Linear 仍按 Xavier 初始化，[scene_distill_module.py:344](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:344)；之后单独对六个 injection projection 执行 `nn.init.zeros_`，防止通用初始化覆盖零门。
 - 将当前“一次接收六层 features”的 `forward` 改为在线单-stage接口：
 
@@ -132,7 +132,7 @@ forward(
 ```
 
 - `stage_index` 必须处于 `[0,5]`；`llm_layer_features` 必须是当前目标 block 输出的完整 flattened image span。
-- 返回的 `injection_delta` 为对应 `post_injection_projections[stage_index](post_after_global)`。
+- 返回的 `injection_delta` 为对应 `post.inject[stage_index](post_after_global)`。
 - 删除当前离线六层循环 [scene_distill_module.py:392](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/scene_distill_module.py:392)，因为它无法让第 $m$ 次 injection 影响更深 LLM输出。
 
 ### 3.2 `modeling_qwen3_5.py`
@@ -147,7 +147,6 @@ capture_hidden_state_mask
 新增仅供 SceneDistill wrapper 使用的内部参数：
 
 ```python
-scene_distill_post_module=None
 scene_distill_post_tokens=None
 scene_distill_image_mask=None
 scene_distill_special_mask=None
@@ -196,19 +195,25 @@ return_scene_distill_post_features=False
 - 后续 autoregressive decode没有 `pixel_values/image_grid_thw`，不重复运行 Post；首轮注入产生的状态已经进入更深层 hidden states和KV cache。这与 SpatioLM只在尚无目标层 cache 时运行 condition的约束一致，[qwen3.py:314](/home/jackson/python/spatio-lm/src/spatiolm/models/modules/qwen3.py:314)。
 - 总 loss保持当前公式和权重分支，[modeling_qwen3_5_scene_distill.py:529](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5_scene_distill.py:529)。
 
-### 3.4 Checkpoint与训练兼容
+### 3.4 Checkpoint规范
 
-不修改 config、训练脚本或评估脚本：
-
-- 新增 state-dict keys：
+SceneDistill采用 clean-break checkpoint ABI。Pre/Post由`language_model.scene_distill`唯一持有，训练保存生成下列规范 key：
 
 ```text
-model.scene_distill_post_module.post_injection_projections.{0..5}.weight
+model.language_model.scene_distill.pre.camera
+model.language_model.scene_distill.pre.scene
+model.language_model.scene_distill.pre.frame.{0..3}.*
+model.language_model.scene_distill.pre.global.{0..3}.*
+model.language_model.scene_distill.pre.projector.*
+model.language_model.scene_distill.post.frame.{0..5}.*
+model.language_model.scene_distill.post.global.{0..5}.*
+model.language_model.scene_distill.post.inject.{0..5}.weight
 ```
 
-- 这些 keys 已天然被 `"scene_distill_post_module"` checkpoint过滤规则覆盖，[modeling_qwen3_5.py:47](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:47)，无需修改 checkpoint发现代码。
-- Stage 2 checkpoint缺少新 keys时按现有 `strict=False` 子模块加载机制载入，[modeling_qwen3_5.py:267](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py:267)；六个缺失投影保持显式零初始化，因此初始 LLM输出等价于 Stage 2。
-- Stage 3 checkpoint必须完整保存并恢复六个投影；冻结 teacher仍由 `remove_teacher_weights` 排除。
+- 加载时只有与当前模型精确同名的 key能匹配，不做前缀猜测、重命名或旧 key映射。
+- 旧 SceneDistill checkpoint不兼容；必须重新训练或在运行时之外显式转换为上述格式。
+- 不额外扫描或校验 SceneDistill state dict；missing/unexpected keys完全交由 Transformers/PyTorch的标准加载流程处理。
+- 训练保存不做 SceneDistill key完整性预检；冻结 teacher仍由`remove_teacher_weights`排除。
 - 当前训练逻辑会把整个 Post module设为可训练，[train_qwen.py:125](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/train_qwen.py:125)、[train_qwen.py:133](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/train_qwen.py:133)，因此新投影自动进入训练参数，无需脚本接线。
 - LLM是否训练继续由现有 `tune_mm_llm` 决定，[train_qwen.py:109](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/train_qwen.py:109)；不照搬 SpatioLM冻结整个VLM的策略。
 

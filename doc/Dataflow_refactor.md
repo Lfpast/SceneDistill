@@ -1,6 +1,6 @@
 # SceneDistill 原生 Video Dataflow 完全重构方案与实施记录
 
-> 实施状态：已按本方案完成代码重写。下文第 1、3 节中用于说明问题的部分行号属于重构前基线；当前唯一生效实现以本节列出的工作区行号为准。
+> 实施状态：已按本方案完成代码重写。下文第 1、3 节中用于说明问题的部分行号属于重构前基线；当前唯一生效实现以本节列出的工作区行号为准。后续对 checkpoint key ABI 的 clean-break 规范化是明确追加的实施要求，不恢复任何旧 key 兼容。
 
 ## 0. 当前实现落点
 
@@ -15,6 +15,7 @@
 | Student-only 原生 video 评估 | [qwen3_5.py:288](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:288)、[qwen3_5.py:310](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:310)、[qwen3_5.py:367](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5.py:367)；[qwen3_5_scene_distill.py:15](/home/jackson/python/SceneDistill/SpatialStack/src/lmms_eval/models/qwen3_5_scene_distill.py:15) 明确不构建 teacher |
 | 训练默认值直接覆盖 | [argument.py:33](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/train/argument.py:33) 与 [train.sh:43](/home/jackson/python/SceneDistill/SpatialStack/scripts/train/train.sh:43) 固定为 `16/8/1/262144/12544`；batch、context、LR 不机械翻倍 |
 | 依赖版本固定 | [setup.py:10](/home/jackson/python/SceneDistill/SpatialStack/setup.py:10) 固定 `transformers==5.4.0`，[setup.py:60](/home/jackson/python/SceneDistill/SpatialStack/setup.py:60) 固定 `qwen_vl_utils==0.0.14`；Transformers 5.4.0是首个包含 Qwen3.5 video MRoPE `StopIteration` 官方修复的正式版本 |
+| SceneDistill checkpoint key ABI | Pre/Post由`model.language_model.scene_distill.{pre,post}`唯一持有；训练保存与评估加载共用精确 key契约，无 mapping、alias或 fallback |
 
 ## 1. 目标、问题与重写原则
 
@@ -28,7 +29,7 @@
 - 一个样本可以包含多个独立视频。每个视频拥有自己的 `video_grid_thw` 行、时间轴、timestamp和 GCTE global-attention group。
 - 训练默认值直接从 `8/4/2` 改成 `16/8/1`；评估现有 `max_num_frames=32` 保持不变。
 - SceneDistill 自己不在采样层补帧，也不把补帧当作 VGGT teacher 对齐策略。必须区分两个层次：Qwen3.5 官方 video processor为了满足 `temporal_patch_size=2` 的 Conv3d patchify，会在奇数帧时于 processor内部重复最后一帧；SceneDistill不重写这一原生行为。VGGT teacher仍保留真实的 $S$ 帧，并在不能严格2:1对齐时采用 CamDistill adaptive average pooling。
-- Stage 1/2/3 已实现的 Pre-GCTE、Post-GCTE、internal injection、17-token 顺序、loss和 checkpoint 结构全部冻结，不重新审计或修改。
+- Stage 1/2/3 已实现的 Pre-GCTE、Post-GCTE、internal injection、17-token 顺序和 loss 全部冻结，不重新审计或修改。Checkpoint的数值内容与完整性要求不变，但 key ABI 已按后续 clean-break 要求统一。
 
 ## 2. 重构后的唯一数据契约
 
@@ -296,7 +297,7 @@ VGGT-Omega 的17-token依据保持不变：aggregator按 `camera + 16 register +
 - [modeling_qwen3_5.py](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/modeling_qwen3_5.py) 中 Stage 3 Post/injection接口、层号和 KV-cache gate。
 - [vggt_omega_direct_encoder.py](/home/jackson/python/SceneDistill/SpatialStack/src/qwen_vl/model/geometry_encoders/vggt_omega_direct_encoder.py) 的 teacher抽取和冻结。
 - [aggregator.py](/home/jackson/python/SceneDistill/vggt-omega/vggt_omega/models/aggregator.py) 的 VGGT-Omega模型结构。
-- `NUM_SPECIAL_TOKENS=17`、Pre/Post层号、投影器、loss公式、loss权重、internal injection和 checkpoint keys。
+- `NUM_SPECIAL_TOKENS=17`、Pre/Post层号、投影器计算、loss公式、loss权重、internal injection和 student checkpoint完整性。Checkpoint key命名例外地按后续 clean-break 要求重置，不提供旧 key mapping。
 - 已实现的 `Distillation_stage1.md`、`Distillation_stage2.md`、`Distillation_stage3.md`。
 
 ## 6. 本地可执行的 smoke test
