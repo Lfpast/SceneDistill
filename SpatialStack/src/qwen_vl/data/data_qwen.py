@@ -197,16 +197,20 @@ def _estimated_video_groups(sample: dict, max_frames: int, temporal_patch_size: 
 
 
 class LazySupervisedDataset(Dataset):
-    """SceneDistill SFT dataset with one native-video path for every visual input."""
+    """Qwen3.5 geometry SFT dataset with one native-video path for every visual input."""
 
     def __init__(self, tokenizer: transformers.PreTrainedTokenizer, data_args):
         super().__init__()
         if (
             data_args.model_type != "qwen3.5"
-            or getattr(data_args, "geometry_encoder_type", None) != "scene_distill"
+            or getattr(data_args, "geometry_encoder_type", None)
+            not in {"scene_distill", "vggt_omega_direct"}
             or getattr(data_args, "processor", None) is None
         ):
-            raise ValueError("SceneDistill data loading requires the complete Qwen3.5 processor.")
+            raise ValueError(
+                "Native-video geometry data loading requires SceneDistill or VGGT-Omega direct "
+                "with the complete Qwen3.5 processor."
+            )
 
         dataset_list = data_list(data_args.dataset_use.split(","))
         print(f"Loading datasets: {dataset_list}")
