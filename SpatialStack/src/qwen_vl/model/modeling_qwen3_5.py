@@ -236,13 +236,13 @@ def _validate_qwen3_5_vision_language_fusion_checkpoint(
     )
 
 
-def _load_qwen3_5_geometry_submodules(model, pretrained_model_name_or_path: str) -> int:
+def _load_qwen3_5_geometry_submodules(model, pretrained_model_name_or_path: str) -> set[str]:
     checkpoint_files = _iter_qwen3_5_checkpoint_files(pretrained_model_name_or_path)
     if not checkpoint_files:
-        return 0
+        return set()
 
     model_keys = set(model.state_dict().keys())
-    loaded_key_count = 0
+    loaded_keys = set()
 
     for checkpoint_file in checkpoint_files:
         suffixes = checkpoint_file.suffixes
@@ -265,9 +265,9 @@ def _load_qwen3_5_geometry_submodules(model, pretrained_model_name_or_path: str)
             continue
         _validate_qwen3_5_vision_language_fusion_checkpoint(model, sub_state_dict)
         model.load_state_dict(sub_state_dict, strict=False)
-        loaded_key_count += len(sub_state_dict)
+        loaded_keys.update(sub_state_dict)
 
-    return loaded_key_count
+    return loaded_keys
 
 
 class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
@@ -285,7 +285,6 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         image_mask: Optional[torch.Tensor] = None,
         grid_thw: Optional[torch.Tensor] = None,
         include_camera_token: bool = False,
-        scene_distill_post_module: Optional[nn.Module] = None,
         scene_distill_post_tokens: Optional[torch.Tensor] = None,
         scene_distill_image_mask: Optional[torch.Tensor] = None,
         scene_distill_special_mask: Optional[torch.Tensor] = None,
@@ -336,19 +335,22 @@ class Qwen3_5TextModelWithGeometry(Qwen3_5TextModel):
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
+        scene_distill_post_module = getattr(self, "scene_distill_post_module", None)
         scene_distill_arguments = (
-            scene_distill_post_module,
             scene_distill_post_tokens,
             scene_distill_image_mask,
             scene_distill_special_mask,
             scene_distill_frame_sizes,
             scene_distill_video_sizes,
         )
-        scene_distill_active = all(argument is not None for argument in scene_distill_arguments)
-        if any(argument is not None for argument in scene_distill_arguments) and not scene_distill_active:
+        scene_distill_inputs_active = all(argument is not None for argument in scene_distill_arguments)
+        if any(argument is not None for argument in scene_distill_arguments) and not scene_distill_inputs_active:
             raise ValueError(
-                "SceneDistill Post module, tokens, masks, frame sizes, and video sizes must be provided together."
+                "SceneDistill Post tokens, masks, frame sizes, and video sizes must be provided together."
             )
+        if scene_distill_inputs_active and scene_distill_post_module is None:
+            raise RuntimeError("SceneDistill Post inputs require an initialized Post module.")
+        scene_distill_active = scene_distill_inputs_active and scene_distill_post_module is not None
         if return_scene_distill_post_features and not scene_distill_active:
             raise ValueError("return_scene_distill_post_features requires an active SceneDistill Post path.")
 

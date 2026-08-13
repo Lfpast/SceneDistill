@@ -230,13 +230,42 @@ def test_scene_distill_pre_module_state_dict_round_trip():
         torch.testing.assert_close(source_parameter, target_parameter)
 
 
+def test_scene_distill_checkpoint_ownership_matches_decoder_execution():
+    root = nn.Module()
+    root.model = nn.Module()
+    root.model.scene_distill_pre_module = SceneDistillPreModule(
+        visual_dim=6,
+        text_hidden_dim=10,
+        stream_dim=8,
+        num_heads=2,
+    )
+    root.model.language_model = nn.Module()
+    root.model.language_model.scene_distill_post_module = SceneDistillPostModule(
+        llm_hidden_dim=10,
+        special_dim=8,
+        num_heads=2,
+    )
+
+    keys = set(root.state_dict())
+    pre_keys = {key for key in keys if "scene_distill_pre_module" in key}
+    post_keys = {key for key in keys if "scene_distill_post_module" in key}
+
+    assert len(pre_keys) == 176
+    assert len(post_keys) == 258
+    assert all(key.startswith("model.scene_distill_pre_module.") for key in pre_keys)
+    assert all(
+        key.startswith("model.language_model.scene_distill_post_module.")
+        for key in post_keys
+    )
+
+
 def test_checkpoint_filter_removes_teacher_but_keeps_student():
     state_dict = {
         "model.geometry_encoder.vggt_omega.weight": torch.ones(1),
         "geometry_encoder.vggt_omega.weight": torch.ones(1),
         "model.scene_distill_pre_module.pre_camera_token": torch.ones(1),
-        "model.scene_distill_post_module.post_frame_layers.0.q_proj.weight": torch.ones(1),
-        "model.scene_distill_post_module.post_injection_projections.0.weight": torch.ones(1),
+        "model.language_model.scene_distill_post_module.post_frame_layers.0.q_proj.weight": torch.ones(1),
+        "model.language_model.scene_distill_post_module.post_injection_projections.0.weight": torch.ones(1),
         "model.language_model.weight": torch.ones(1),
     }
 
@@ -244,8 +273,8 @@ def test_checkpoint_filter_removes_teacher_but_keeps_student():
 
     assert set(filtered) == {
         "model.scene_distill_pre_module.pre_camera_token",
-        "model.scene_distill_post_module.post_frame_layers.0.q_proj.weight",
-        "model.scene_distill_post_module.post_injection_projections.0.weight",
+        "model.language_model.scene_distill_post_module.post_frame_layers.0.q_proj.weight",
+        "model.language_model.scene_distill_post_module.post_injection_projections.0.weight",
         "model.language_model.weight",
     }
 
@@ -627,13 +656,13 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
         past_key_values=baseline_cache,
         cache_position=torch.arange(20),
     )
+    text_model.scene_distill_post_module = post_module
     zero_gate_cache = []
     zero_gate_outputs = text_model(
         inputs_embeds=inputs_embeds,
         use_cache=True,
         past_key_values=zero_gate_cache,
         cache_position=torch.arange(20),
-        scene_distill_post_module=post_module,
         scene_distill_post_tokens=torch.zeros(1, NUM_SPECIAL_TOKENS, 8),
         scene_distill_image_mask=image_mask,
         scene_distill_special_mask=special_mask,
@@ -655,7 +684,6 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
         inputs_embeds=inputs_embeds,
         use_cache=False,
         cache_position=torch.arange(20),
-        scene_distill_post_module=post_module,
         scene_distill_post_tokens=torch.zeros(1, NUM_SPECIAL_TOKENS, 8),
         scene_distill_image_mask=image_mask,
         scene_distill_special_mask=special_mask,
@@ -700,7 +728,7 @@ def test_online_post_injection_uses_block_outputs_and_only_updates_special_token
             inputs_embeds=torch.zeros(1, 20, 8),
             use_cache=False,
             cache_position=torch.arange(20),
-            scene_distill_post_module=post_module,
+            scene_distill_post_tokens=torch.zeros(1, NUM_SPECIAL_TOKENS, 8),
         )
 
 
@@ -737,12 +765,12 @@ def test_online_post_injection_survives_gradient_checkpointing():
     )
     with torch.no_grad():
         post_module.post_injection_projections[0].weight.fill_(0.1)
+    model.scene_distill_post_module = post_module
 
     outputs = model(
         input_ids=input_ids,
         attention_mask=torch.ones_like(input_ids),
         use_cache=False,
-        scene_distill_post_module=post_module,
         scene_distill_post_tokens=torch.randn(1, NUM_SPECIAL_TOKENS, 8),
         scene_distill_image_mask=image_mask,
         scene_distill_special_mask=special_mask,
@@ -868,7 +896,8 @@ def test_scene_distill_teacher_is_constructed_only_with_a_training_path(monkeypa
         )
         model.geometry_encoder = None
         model.scene_distill_pre_module = None
-        model.scene_distill_post_module = None
+        model.language_model = nn.Module()
+        model.language_model.scene_distill_post_module = None
         model._geometry_modules_initialized = False
         return model
 
@@ -876,7 +905,7 @@ def test_scene_distill_teacher_is_constructed_only_with_a_training_path(monkeypa
     eval_model.initialize_geometry_modules()
     assert eval_model.geometry_encoder is None
     assert eval_model.scene_distill_pre_module is not None
-    assert eval_model.scene_distill_post_module is not None
+    assert eval_model.language_model.scene_distill_post_module is not None
     assert teacher_paths == []
     with pytest.raises(RuntimeError, match="training requires a VGGT-Omega teacher"):
         eval_model._collect_teacher_features([torch.zeros(1)], torch.device("cpu"))
@@ -987,18 +1016,18 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
             self.layer_indices = LLM_BLOCK_INDICES
 
     class FakeLanguageModel(nn.Module):
-        def __init__(self):
+        def __init__(self, post_module):
             super().__init__()
+            self.scene_distill_post_module = post_module
             self.post_requests = []
 
         def forward(
             self,
             inputs_embeds,
-            scene_distill_post_module=None,
             return_scene_distill_post_features=False,
             **kwargs,
         ):
-            self.post_requests.append(scene_distill_post_module)
+            self.post_requests.append(self.scene_distill_post_module)
             return output_type(
                 last_hidden_state=inputs_embeds,
                 hidden_states=(teacher_features[..., :1024], teacher_features[..., 1024:])
@@ -1014,8 +1043,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
     )
     model.geometry_encoder = nn.Identity()
     model.scene_distill_pre_module = FakePreModule()
-    model.scene_distill_post_module = FakePostModule()
-    model.language_model = FakeLanguageModel()
+    model.language_model = FakeLanguageModel(FakePostModule())
     model._last_pre_distill_loss = None
     model._last_post_distill_loss = None
     model._direct_only_mask = None
@@ -1055,7 +1083,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
     assert model._last_pre_distill_loss is not None
     assert model._last_post_distill_loss is not None
     assert outputs.hidden_states is None
@@ -1067,7 +1095,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=True,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
 
     teacher_calls["count"] = 0
     model(
@@ -1076,7 +1104,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 1
-    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
 
     teacher_calls["count"] = 0
     model.geometry_encoder = None
@@ -1086,7 +1114,7 @@ def test_inner_wrapper_always_runs_post_and_reuses_teacher():
         compute_post_distill_loss=False,
     )
     assert teacher_calls["count"] == 0
-    assert model.language_model.post_requests[-1] is model.scene_distill_post_module
+    assert model.language_model.post_requests[-1] is model.language_model.scene_distill_post_module
 
     calls_before_decode = len(model.language_model.post_requests)
     model(

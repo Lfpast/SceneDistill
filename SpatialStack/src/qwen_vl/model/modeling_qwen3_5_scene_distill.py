@@ -55,8 +55,11 @@ def align_qwen3_5_scene_distill_modules(model):
 
     reference_tensor = getattr(getattr(model, "lm_head", None), "weight", None)
     if reference_tensor is not None and reference_tensor.device.type != "meta":
-        for module_name in ("scene_distill_pre_module", "scene_distill_post_module"):
-            module = getattr(inner_model, module_name, None)
+        modules = (
+            getattr(inner_model, "scene_distill_pre_module", None),
+            getattr(getattr(inner_model, "language_model", None), "scene_distill_post_module", None),
+        )
+        for module in modules:
             if module is not None:
                 module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
     return model
@@ -71,7 +74,6 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
         if not hasattr(config, "post_distill_weight"):
             config.post_distill_weight = POST_DISTILL_WEIGHT
         self.scene_distill_pre_module = None
-        self.scene_distill_post_module = None
         self._last_pre_distill_loss = None
         self._last_post_distill_loss = None
         super().__init__(config)
@@ -124,7 +126,7 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             visual_dim=int(config.vision_config.hidden_size),
             text_hidden_dim=int(config.text_config.hidden_size),
         )
-        self.scene_distill_post_module = SceneDistillPostModule(
+        self.language_model.scene_distill_post_module = SceneDistillPostModule(
             special_dim=1024,
             llm_hidden_dim=int(config.text_config.hidden_size),
             num_heads=16,
@@ -141,7 +143,10 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
                 return
         if reference_tensor.device.type == "meta":
             return
-        for module in (self.scene_distill_pre_module, self.scene_distill_post_module):
+        for module in (
+            self.scene_distill_pre_module,
+            getattr(self.language_model, "scene_distill_post_module", None),
+        ):
             if module is not None:
                 module.to(device=reference_tensor.device, dtype=reference_tensor.dtype)
 
@@ -305,7 +310,8 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             raise ValueError("SceneDistill does not support precomputed inputs_embeds on the first visual step.")
 
         inputs_embeds = self.get_input_embeddings()(input_ids)
-        if self.scene_distill_pre_module is None or self.scene_distill_post_module is None:
+        scene_distill_post_module = getattr(self.language_model, "scene_distill_post_module", None)
+        if self.scene_distill_pre_module is None or scene_distill_post_module is None:
             self.initialize_geometry_modules()
         self.align_geometry_modules(inputs_embeds)
 
@@ -421,7 +427,6 @@ class Qwen3_5ModelWithSceneDistill(Qwen3_5ModelWithGeometry):
             past_key_values=past_key_values,
             inputs_embeds=expanded_inputs_embeds,
             cache_position=cache_position,
-            scene_distill_post_module=self.scene_distill_post_module,
             scene_distill_post_tokens=pre_global_tokens,
             scene_distill_image_mask=video_mask_2d,
             scene_distill_special_mask=self._direct_only_mask,
@@ -460,14 +465,15 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         self.post_init()
         for module in (
             self.model.scene_distill_pre_module,
-            self.model.scene_distill_post_module,
+            getattr(self.model.language_model, "scene_distill_post_module", None),
         ):
             if module is not None:
                 module.reset_parameters()
 
     def _init_weights(self, module):
         super()._init_weights(module)
-        post_module = getattr(getattr(self, "model", None), "scene_distill_post_module", None)
+        inner_model = getattr(self, "model", None)
+        post_module = getattr(getattr(inner_model, "language_model", None), "scene_distill_post_module", None)
         if post_module is not None and any(
             module is projection
             for projection in post_module.post_injection_projections
@@ -481,10 +487,30 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         if cls.__name__ in architectures:
             checkpoint_root = _resolve_qwen3_5_checkpoint_root(pretrained_model_name_or_path)
             loaded_keys = _load_qwen3_5_geometry_submodules(model, checkpoint_root)
-            if loaded_keys == 0:
+            expected_keys = {
+                key
+                for key in model.state_dict()
+                if "scene_distill_pre_module" in key or "scene_distill_post_module" in key
+            }
+            expected_pre_keys = {
+                key for key in expected_keys if key.startswith("model.scene_distill_pre_module.")
+            }
+            expected_post_keys = {
+                key
+                for key in expected_keys
+                if key.startswith("model.language_model.scene_distill_post_module.")
+            }
+            if not expected_pre_keys or not expected_post_keys:
                 raise RuntimeError(
-                    "SceneDistill checkpoint declares the SceneDistill architecture but contains no "
-                    "scene_distill_pre_module or scene_distill_post_module weights."
+                    "SceneDistill model did not initialize the canonical Pre/Post checkpoint modules."
+                )
+            missing_keys = expected_keys - loaded_keys
+            if missing_keys:
+                missing_preview = ", ".join(sorted(missing_keys)[:5])
+                raise RuntimeError(
+                    "SceneDistill checkpoint is missing "
+                    f"{len(missing_keys)} of {len(expected_keys)} required student weights; "
+                    f"first missing keys: {missing_preview}."
                 )
         return align_qwen3_5_scene_distill_modules(model)
 
