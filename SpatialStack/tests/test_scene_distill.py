@@ -259,6 +259,41 @@ def test_scene_distill_checkpoint_ownership_matches_decoder_execution():
     )
 
 
+def test_scene_distill_checkpoint_loader_normalizes_runtime_ownership(tmp_path):
+    modeling_qwen3_5 = _import_qwen35_module_or_skip(
+        "qwen_vl.model.modeling_qwen3_5"
+    )
+    from safetensors.torch import save_file
+
+    model = nn.Module()
+    model.model = nn.Module()
+    model.model.scene_distill_pre_module = nn.Linear(2, 2, bias=False)
+    model.model.language_model = nn.Module()
+    model.model.language_model.scene_distill_post_module = nn.Linear(2, 2, bias=False)
+
+    pre_weight = torch.full((2, 2), 3.0)
+    post_weight = torch.full((2, 2), 5.0)
+    save_file(
+        {
+            "model.visual.scene_distill_pre_module.weight": pre_weight,
+            "model.scene_distill_post_module.weight": post_weight,
+        },
+        tmp_path / "model.safetensors",
+    )
+
+    loaded_keys = modeling_qwen3_5._load_qwen3_5_geometry_submodules(model, tmp_path)
+
+    assert loaded_keys == {
+        "model.scene_distill_pre_module.weight",
+        "model.language_model.scene_distill_post_module.weight",
+    }
+    torch.testing.assert_close(model.model.scene_distill_pre_module.weight, pre_weight)
+    torch.testing.assert_close(
+        model.model.language_model.scene_distill_post_module.weight,
+        post_weight,
+    )
+
+
 def test_checkpoint_filter_removes_teacher_but_keeps_student():
     state_dict = {
         "model.geometry_encoder.vggt_omega.weight": torch.ones(1),

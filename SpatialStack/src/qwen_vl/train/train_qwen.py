@@ -64,16 +64,12 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
             state_dict = trainer.accelerator.get_state_dict(trainer.deepspeed)
             state_dict = remove_teacher_weights(state_dict)
-            has_pre = any(key.startswith("model.scene_distill_pre_module.") for key in state_dict)
-            has_post = any(
-                key.startswith("model.language_model.scene_distill_post_module.")
-                for key in state_dict
-            )
+            has_pre = any("scene_distill_pre_module." in key for key in state_dict)
+            has_post = any("scene_distill_post_module." in key for key in state_dict)
             if not has_pre or not has_post:
                 raise RuntimeError(
-                    "Refusing to save an incomplete SceneDistill checkpoint: expected Pre weights under "
-                    "model.scene_distill_pre_module and Post weights under "
-                    "model.language_model.scene_distill_post_module."
+                    "Refusing to save an incomplete SceneDistill checkpoint: both Pre and Post weights "
+                    "must be present in the gathered distributed state dict."
                 )
             trainer._save(output_dir, state_dict=state_dict)
             return

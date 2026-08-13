@@ -243,23 +243,59 @@ def _load_qwen3_5_geometry_submodules(model, pretrained_model_name_or_path: str)
 
     model_keys = set(model.state_dict().keys())
     loaded_keys = set()
+    scene_markers = (
+        "scene_distill_pre_module.",
+        "scene_distill_post_module.",
+    )
+    scene_key_targets = {}
+    for model_key in model_keys:
+        for marker in scene_markers:
+            if marker not in model_key:
+                continue
+            relative_key = model_key.split(marker, 1)[1]
+            lookup_key = (marker, relative_key)
+            if lookup_key in scene_key_targets:
+                scene_key_targets[lookup_key] = None
+            else:
+                scene_key_targets[lookup_key] = model_key
+
+    def resolve_checkpoint_key(checkpoint_key: str) -> Optional[str]:
+        if checkpoint_key in model_keys:
+            return checkpoint_key
+        for marker in scene_markers:
+            if marker in checkpoint_key:
+                relative_key = checkpoint_key.split(marker, 1)[1]
+                return scene_key_targets.get((marker, relative_key))
+        return None
 
     for checkpoint_file in checkpoint_files:
         suffixes = checkpoint_file.suffixes
         if suffixes and suffixes[-1] == ".safetensors":
             with safe_open(checkpoint_file, framework="pt", device="cpu") as handle:
-                sub_state_dict = {
-                    key: handle.get_tensor(key)
-                    for key in handle.keys()
-                    if key in model_keys and any(keyword in key for keyword in GEOMETRY_STATE_KEYWORDS)
-                }
+                sub_state_dict = {}
+                for checkpoint_key in handle.keys():
+                    if not any(keyword in checkpoint_key for keyword in GEOMETRY_STATE_KEYWORDS):
+                        continue
+                    model_key = resolve_checkpoint_key(checkpoint_key)
+                    if model_key is not None:
+                        if model_key in sub_state_dict:
+                            raise RuntimeError(
+                                f"Checkpoint contains multiple SceneDistill weights for {model_key}."
+                            )
+                        sub_state_dict[model_key] = handle.get_tensor(checkpoint_key)
         else:
             state_dict = torch.load(checkpoint_file, map_location="cpu", weights_only=True)
-            sub_state_dict = {
-                key: value
-                for key, value in state_dict.items()
-                if key in model_keys and any(keyword in key for keyword in GEOMETRY_STATE_KEYWORDS)
-            }
+            sub_state_dict = {}
+            for checkpoint_key, value in state_dict.items():
+                if not any(keyword in checkpoint_key for keyword in GEOMETRY_STATE_KEYWORDS):
+                    continue
+                model_key = resolve_checkpoint_key(checkpoint_key)
+                if model_key is not None:
+                    if model_key in sub_state_dict:
+                        raise RuntimeError(
+                            f"Checkpoint contains multiple SceneDistill weights for {model_key}."
+                        )
+                    sub_state_dict[model_key] = value
 
         if not sub_state_dict:
             continue
