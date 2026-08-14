@@ -71,7 +71,7 @@ class SceneDistillTrainer(Trainer):
             if total is None or count == 0:
                 continue
             stats = torch.stack((total, total.new_tensor(float(count))))
-            stats = self._nested_gather(stats).reshape(-1, 2).sum(dim=0)
+            stats = self.accelerator.gather(stats).reshape(-1, 2).sum(dim=0)
             logs[key] = (stats[0] / stats[1]).item()
         return logs
 

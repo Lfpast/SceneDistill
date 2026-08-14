@@ -1198,7 +1198,10 @@ def test_scene_distill_trainer_averages_raw_cosine_losses(monkeypatch):
     trainer = object.__new__(trainer_module.SceneDistillTrainer)
     trainer._scene_distill_loss_totals = {}
     trainer._scene_distill_loss_counts = {}
-    trainer._nested_gather = lambda value: value
+    remote_stats = iter(([10.0, 2.0], [20.0, 4.0]))
+    trainer.accelerator = SimpleNamespace(
+        gather=lambda value: torch.cat((value, value.new_tensor(next(remote_stats))))
+    )
 
     outputs = SimpleNamespace(
         pre_distill_cosine_loss=torch.tensor(2.0),
@@ -1222,11 +1225,9 @@ def test_scene_distill_trainer_averages_raw_cosine_losses(monkeypatch):
         lambda self, logs, start_time=None: logged.update(logs),
     )
     trainer.log({"loss": 3.0})
-    assert logged == {
-        "loss": 3.0,
-        "pre_distill_cosine_loss": 3.0,
-        "post_distill_cosine_loss": 6.0,
-    }
+    assert logged["loss"] == 3.0
+    assert logged["pre_distill_cosine_loss"] == pytest.approx(4.0)
+    assert logged["post_distill_cosine_loss"] == pytest.approx(32.0 / 6.0)
     assert trainer._pop_scene_distill_logs() == {}
 
 
