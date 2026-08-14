@@ -178,6 +178,9 @@ echo "[INFO] nproc_per_node=${NPROC_PER_NODE} nnodes=${NNODES} node_rank=${NODE_
 echo "[INFO] total_batch_size=${TOTAL_BATCH_SIZE} per_device=${PER_DEVICE_TRAIN_BATCH_SIZE} grad_accum=${GRADIENT_ACCUMULATION_STEPS}"
 echo "[INFO] save_strategy=${SAVE_STRATEGY} final_model_save=true"
 echo "[INFO] geometry=${USE_GEOMETRY_ENCODER} type=${GEOMETRY_ENCODER_TYPE} fusion=${FEATURE_FUSION_METHOD} pre_distill_weight=${PRE_DISTILL_WEIGHT} post_distill_weight=${POST_DISTILL_WEIGHT}"
+if [[ "${GEOMETRY_ENCODER_TYPE}" == "scene_distill" && "${REPORT_TO}" == *"wandb"* ]]; then
+    echo "[INFO] wandb_metrics=train/pre_distill_cosine_loss,train/post_distill_cosine_loss logging_steps=${LOGGING_STEPS}"
+fi
 
 python -m torch.distributed.run \
     --nproc_per_node "${NPROC_PER_NODE}" \

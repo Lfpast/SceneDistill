@@ -32,6 +32,7 @@ sys.path.append(str(project_root))
 
 import qwen_vl.train.trainer
 import qwen_vl.train.sampler
+from qwen_vl.train.trainer import SceneDistillTrainer
 
 from transformers import (
     Qwen2VLForConditionalGeneration,
@@ -376,7 +377,12 @@ def train(attn_implementation="flash_attention_2"):
         setattr(data_args, "geometry_direct_token_mode", model_args.geometry_direct_token_mode)
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     configure_warmup_steps(training_args, data_module["train_dataset"])
-    trainer = Trainer(
+    trainer_class = (
+        SceneDistillTrainer
+        if model_args.use_geometry_encoder and model_args.geometry_encoder_type == "scene_distill"
+        else Trainer
+    )
+    trainer = trainer_class(
         model=model, processing_class=tokenizer, args=training_args, **data_module
     )
 

@@ -55,6 +55,8 @@ export TUNE_MM_VISION=False
 export OUTPUT_DIR="${OUTPUT_DIR:-/project/peilab/jys/qwen35_output/SceneDistill-stage3-01}"
 export CACHE_DIR="${CACHE_DIR:-${HUGGINGFACE_HUB_CACHE}}"
 
+export REPORT_TO=wandb
+export LOGGING_STEPS="${LOGGING_STEPS:-1}"
 export WANDB_PROJECT="SceneDistill"
 export WANDB_MODE="online"
 export WANDB_LOCAL_ROOT="${TMPDIR:-/tmp}/SceneDistill-wandb"

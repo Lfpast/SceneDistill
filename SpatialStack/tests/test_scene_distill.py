@@ -1159,6 +1159,18 @@ def test_outer_wrapper_applies_independent_losses_and_clears_transients():
         wrapper.config.post_distill_weight = post_weight
         outputs = wrapper(**visual_inputs)
         torch.testing.assert_close(outputs.loss, torch.tensor(expected_loss))
+        if pre_weight > 0:
+            torch.testing.assert_close(
+                outputs.pre_distill_cosine_loss, torch.tensor(2.0)
+            )
+        else:
+            assert outputs.pre_distill_cosine_loss is None
+        if post_weight > 0:
+            torch.testing.assert_close(
+                outputs.post_distill_cosine_loss, torch.tensor(5.0)
+            )
+        else:
+            assert outputs.post_distill_cosine_loss is None
         assert wrapper.model.calls[-1] == (pre_weight > 0, post_weight > 0)
         assert wrapper.model._last_pre_distill_loss is None
         assert wrapper.model._last_post_distill_loss is None
@@ -1166,6 +1178,8 @@ def test_outer_wrapper_applies_independent_losses_and_clears_transients():
     wrapper.eval()
     outputs = wrapper(**visual_inputs)
     torch.testing.assert_close(outputs.loss, torch.tensor(3.0))
+    assert outputs.pre_distill_cosine_loss is None
+    assert outputs.post_distill_cosine_loss is None
     assert wrapper.model.calls[-1] == (False, False)
 
     outputs = wrapper(
@@ -1174,7 +1188,46 @@ def test_outer_wrapper_applies_independent_losses_and_clears_transients():
         image_grid_thw=torch.ones(1, 3, dtype=torch.long),
     )
     assert outputs.loss is None
+    assert outputs.pre_distill_cosine_loss is None
+    assert outputs.post_distill_cosine_loss is None
     assert wrapper.model.calls[-1] == (False, False)
+
+
+def test_scene_distill_trainer_averages_raw_cosine_losses(monkeypatch):
+    trainer_module = __import__("qwen_vl.train.trainer", fromlist=["*"])
+    trainer = object.__new__(trainer_module.SceneDistillTrainer)
+    trainer._scene_distill_loss_totals = {}
+    trainer._scene_distill_loss_counts = {}
+    trainer._nested_gather = lambda value: value
+
+    outputs = SimpleNamespace(
+        pre_distill_cosine_loss=torch.tensor(2.0),
+        post_distill_cosine_loss=torch.tensor(5.0),
+    )
+    monkeypatch.setattr(
+        trainer_module.Trainer,
+        "compute_loss",
+        lambda *args, **kwargs: (torch.tensor(3.0), outputs),
+    )
+
+    trainer.compute_loss(model=None, inputs={})
+    outputs.pre_distill_cosine_loss = torch.tensor(4.0)
+    outputs.post_distill_cosine_loss = torch.tensor(7.0)
+    trainer.compute_loss(model=None, inputs={})
+
+    logged = {}
+    monkeypatch.setattr(
+        trainer_module.Trainer,
+        "log",
+        lambda self, logs, start_time=None: logged.update(logs),
+    )
+    trainer.log({"loss": 3.0})
+    assert logged == {
+        "loss": 3.0,
+        "pre_distill_cosine_loss": 3.0,
+        "post_distill_cosine_loss": 6.0,
+    }
+    assert trainer._pop_scene_distill_logs() == {}
 
 
 def test_inner_wrapper_always_runs_post_and_reuses_teacher():

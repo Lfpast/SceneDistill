@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional
 
 import torch
@@ -39,6 +40,12 @@ from .vggt_omega_direct_packing import (
 
 
 SCENE_DISTILL_ENCODER_TYPE = "scene_distill"
+
+
+@dataclass
+class SceneDistillCausalLMOutputWithPast(Qwen3_5CausalLMOutputWithPast):
+    pre_distill_cosine_loss: Optional[torch.FloatTensor] = None
+    post_distill_cosine_loss: Optional[torch.FloatTensor] = None
 
 
 def is_scene_distill_geometry_encoder(geometry_encoder_type: str) -> bool:
@@ -500,7 +507,7 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
         geometry_encoder_inputs: Optional[List[torch.Tensor]] = None,
         tag: Optional[str] = None,
         **kwargs,
-    ) -> Qwen3_5CausalLMOutputWithPast:
+    ) -> SceneDistillCausalLMOutputWithPast:
         scene_distill_active = (
             is_scene_distill_geometry_encoder(getattr(self.config, "geometry_encoder_type", "vggt"))
             and pixel_values_videos is not None
@@ -572,19 +579,26 @@ class Qwen3_5ForConditionalGenerationWithSceneDistill(Qwen3_5ForConditionalGener
                 raise RuntimeError("SceneDistill Post training requires both SFT and post distillation losses.")
             loss = loss + post_distill_weight * post_distill_loss
 
-        return Qwen3_5CausalLMOutputWithPast(
+        return SceneDistillCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             rope_deltas=outputs.rope_deltas,
+            pre_distill_cosine_loss=(
+                pre_distill_loss.detach() if compute_pre_distill_loss else None
+            ),
+            post_distill_cosine_loss=(
+                post_distill_loss.detach() if compute_post_distill_loss else None
+            ),
         )
 
 
 __all__ = [
     "Qwen3_5ForConditionalGenerationWithSceneDistill",
     "Qwen3_5ModelWithSceneDistill",
+    "SceneDistillCausalLMOutputWithPast",
     "SCENE_DISTILL_ENCODER_TYPE",
     "align_qwen3_5_scene_distill_modules",
     "is_scene_distill_geometry_encoder",

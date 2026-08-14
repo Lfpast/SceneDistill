@@ -1,3 +1,4 @@
+import torch
 from transformers import Trainer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
@@ -18,6 +19,66 @@ except ImportError:
     Qwen3_5TextModel = None
     Qwen3_5VisionModel = None
 from transformers.trainer import get_parameter_names
+
+
+SCENE_DISTILL_COSINE_LOSS_KEYS = (
+    "pre_distill_cosine_loss",
+    "post_distill_cosine_loss",
+)
+
+
+class SceneDistillTrainer(Trainer):
+    """Log raw SceneDistill cosine losses at the normal Trainer cadence."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scene_distill_loss_totals = {}
+        self._scene_distill_loss_counts = {}
+
+    def compute_loss(
+        self,
+        model,
+        inputs,
+        return_outputs=False,
+        num_items_in_batch=None,
+    ):
+        loss, outputs = super().compute_loss(
+            model,
+            inputs,
+            return_outputs=True,
+            num_items_in_batch=num_items_in_batch,
+        )
+        for key in SCENE_DISTILL_COSINE_LOSS_KEYS:
+            value = getattr(outputs, key, None)
+            if value is None:
+                continue
+            value = value.detach().float().mean()
+            previous = self._scene_distill_loss_totals.get(key)
+            self._scene_distill_loss_totals[key] = (
+                value if previous is None else previous + value
+            )
+            self._scene_distill_loss_counts[key] = (
+                self._scene_distill_loss_counts.get(key, 0) + 1
+            )
+
+        return (loss, outputs) if return_outputs else loss
+
+    def _pop_scene_distill_logs(self):
+        logs = {}
+        for key in SCENE_DISTILL_COSINE_LOSS_KEYS:
+            total = self._scene_distill_loss_totals.pop(key, None)
+            count = self._scene_distill_loss_counts.pop(key, 0)
+            if total is None or count == 0:
+                continue
+            stats = torch.stack((total, total.new_tensor(float(count))))
+            stats = self._nested_gather(stats).reshape(-1, 2).sum(dim=0)
+            logs[key] = (stats[0] / stats[1]).item()
+        return logs
+
+    def log(self, logs, start_time=None):
+        if "loss" in logs:
+            logs.update(self._pop_scene_distill_logs())
+        return super().log(logs, start_time=start_time)
 
 
 def print_trainable_parameters_visual(self) -> None:
