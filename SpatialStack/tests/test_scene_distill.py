@@ -1193,7 +1193,7 @@ def test_outer_wrapper_applies_independent_losses_and_clears_transients():
     assert wrapper.model.calls[-1] == (False, False)
 
 
-def test_scene_distill_trainer_averages_raw_cosine_losses(monkeypatch):
+def test_scene_distill_trainer_logs_per_token_cosine_losses(monkeypatch):
     trainer_module = __import__("qwen_vl.train.trainer", fromlist=["*"])
     trainer = object.__new__(trainer_module.SceneDistillTrainer)
     trainer._scene_distill_loss_totals = {}
@@ -1226,8 +1226,10 @@ def test_scene_distill_trainer_averages_raw_cosine_losses(monkeypatch):
     )
     trainer.log({"loss": 3.0})
     assert logged["loss"] == 3.0
-    assert logged["pre_distill_cosine_loss"] == pytest.approx(4.0)
-    assert logged["post_distill_cosine_loss"] == pytest.approx(32.0 / 6.0)
+    assert logged["pre_distill_cosine_loss"] == pytest.approx(4.0 / NUM_SPECIAL_TOKENS)
+    assert logged["post_distill_cosine_loss"] == pytest.approx(
+        32.0 / (6.0 * NUM_SPECIAL_TOKENS)
+    )
     assert trainer._pop_scene_distill_logs() == {}
 
 

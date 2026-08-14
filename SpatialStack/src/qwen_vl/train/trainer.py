@@ -20,6 +20,8 @@ except ImportError:
     Qwen3_5VisionModel = None
 from transformers.trainer import get_parameter_names
 
+from qwen_vl.model.scene_distill_module import NUM_SPECIAL_TOKENS
+
 
 SCENE_DISTILL_COSINE_LOSS_KEYS = (
     "pre_distill_cosine_loss",
@@ -28,7 +30,7 @@ SCENE_DISTILL_COSINE_LOSS_KEYS = (
 
 
 class SceneDistillTrainer(Trainer):
-    """Log raw SceneDistill cosine losses at the normal Trainer cadence."""
+    """Log per-token SceneDistill cosine losses at the normal Trainer cadence."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -72,7 +74,7 @@ class SceneDistillTrainer(Trainer):
                 continue
             stats = torch.stack((total, total.new_tensor(float(count))))
             stats = self.accelerator.gather(stats).reshape(-1, 2).sum(dim=0)
-            logs[key] = (stats[0] / stats[1]).item()
+            logs[key] = (stats[0] / stats[1] / NUM_SPECIAL_TOKENS).item()
         return logs
 
     def log(self, logs, start_time=None):
